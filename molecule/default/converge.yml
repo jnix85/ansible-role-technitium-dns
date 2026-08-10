@@ -77,4 +77,7 @@
             address: 10.10.10.120
 
   roles:
-    - role: ansible-role-technitium-dns
+    # By path, not by name: molecule's roles path does not include the repo's
+    # parent, and the prerun symlink is named from meta (jnix85.technitium_dns),
+    # not after the checkout directory. A path depends on neither.
+    - role: "{{ playbook_dir }}/../.."
