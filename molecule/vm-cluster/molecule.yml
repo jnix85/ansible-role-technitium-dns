@@ -1,0 +1,95 @@
+---
+# Three Debian 12 VMs, one Technitium cluster, one floating VIP.
+#
+# VMs rather than containers, for three reasons this role specifically cares
+# about:
+#   - The official Technitium installer refuses to run without systemd. In a
+#     container that is a constant fight; in a VM it is simply true.
+#   - systemd-resolved holds :53 on a stock Debian VM, so the role's stub
+#     listener handling is exercised here and nowhere else.
+#   - VRRP needs real interfaces on a real L2 segment. Failover tested on a
+#     shared docker bridge proves very little.
+#
+# Requires libvirt/KVM and vagrant-libvirt on the host:
+#   sudo apt install -y libvirt-daemon-system vagrant vagrant-libvirt
+#   molecule test -s vm-cluster
+
+role_name_check: 1
+
+dependency:
+  name: galaxy
+  options:
+    requirements-file: molecule/requirements.yml
+
+driver:
+  name: vagrant
+  provider:
+    name: libvirt
+
+platforms:
+  - name: technitium-ns1
+    box: debian/bookworm64
+    memory: 1024
+    cpus: 1
+    groups: [technitium_dns]
+    interfaces:
+      - network_name: private_network
+        ip: 192.168.56.11
+        auto_config: true
+
+  - name: technitium-ns2
+    box: debian/bookworm64
+    memory: 1024
+    cpus: 1
+    groups: [technitium_dns]
+    interfaces:
+      - network_name: private_network
+        ip: 192.168.56.12
+        auto_config: true
+
+  - name: technitium-ns3
+    box: debian/bookworm64
+    memory: 1024
+    cpus: 1
+    groups: [technitium_dns]
+    interfaces:
+      - network_name: private_network
+        ip: 192.168.56.13
+        auto_config: true
+
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_LIBRARY: "${MOLECULE_PROJECT_DIRECTORY}/library"
+    ANSIBLE_MODULE_UTILS: "${MOLECULE_PROJECT_DIRECTORY}/module_utils"
+  inventory:
+    host_vars:
+      technitium-ns1:
+        node_address: 192.168.56.11
+      technitium-ns2:
+        node_address: 192.168.56.12
+      technitium-ns3:
+        node_address: 192.168.56.13
+    group_vars:
+      technitium_dns:
+        # A free address on the same private network, above the node addresses.
+        cluster_vip: 192.168.56.10
+  config_options:
+    defaults:
+      callbacks_enabled: profile_tasks
+      callback_result_format: yaml
+      # Secondaries must not race ahead of the primary's cluster init.
+      strategy: linear
+  playbooks:
+    converge: converge.yml
+    verify: verify.yml
+
+scenario:
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - converge
+    - idempotence
+    - verify
+    - destroy

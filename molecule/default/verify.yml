@@ -1,6 +1,7 @@
 ---
 - name: Verify the node is configured as declared
   hosts: all
+  become: true
   gather_facts: false
 
   vars:

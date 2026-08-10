@@ -1,6 +1,7 @@
 ---
 - name: Converge a three node cluster with a floating VIP
   hosts: technitium_dns
+  become: true
   strategy: linear
 
   vars:

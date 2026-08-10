@@ -1,5 +1,5 @@
 ---
-- name: Verify clustering and VRRP failover
+- name: Verify clustering, and that the role's VM specific handling took effect
   hosts: technitium_dns
   become: true
 
@@ -7,7 +7,21 @@
     technitium_dns_admin_password: molecule-test-password
 
   tasks:
-    - name: Read the cluster state from every node
+    - name: The DNS service is running
+      ansible.builtin.systemd_service:
+        name: dns
+      register: dns_service
+      failed_when: dns_service.status.ActiveState != 'active'
+
+    # Only a VM exercises this: a stock Debian VM has systemd-resolved holding
+    # :53, and Technitium cannot bind 0.0.0.0:53 until the stub listener is off.
+    - name: Technitium owns port 53, not systemd-resolved
+      ansible.builtin.command: ss -lnup sport = :53
+      register: port53
+      changed_when: false
+      failed_when: "'systemd-resolve' in port53.stdout"
+
+    - name: Read cluster state and zones from this node
       technitium_dns_info:
         api_url: http://127.0.0.1:5380
         api_username: admin
@@ -35,6 +49,8 @@
           - technitium.cluster.nodes | selectattr('type', 'equalto', 'Primary')
             | list | length == 1
 
+    # The zone is only created on the primary; reaching the secondaries is the
+    # cluster catalog doing its job.
     - name: The catalog member zone was provisioned on this node
       ansible.builtin.assert:
         that:
@@ -44,22 +60,16 @@
           zones present: {{ technitium.zones | map(attribute='name') | list }}
 
 
-# One host drives this: run_once is a task keyword, not a play keyword, so
-# scoping the play instead is what actually stops the failover test running
-# three times over. Facts are gathered because the VIP is derived from them -
-# set_fact in converge.yml does not survive into this separate playbook run.
 - name: Verify the VIP answers, and moves when the master steps aside
+  # One host drives this. run_once is a task keyword, not a play keyword, so
+  # scoping the play is what actually prevents it running once per node.
   hosts: technitium_dns[0]
   become: true
-  gather_facts: true
-
-  vars:
-    vip_address: "{{ ansible_default_ipv4.address.split('.')[:3] | join('.') }}.250"
 
   tasks:
     - name: Find the node currently holding the VIP
       ansible.builtin.shell:
-        cmd: "ip -4 addr show | grep -qw {{ vip_address }}"
+        cmd: "ip -4 addr show | grep -qw {{ cluster_vip }}"
       register: vip_holder
       changed_when: false
       failed_when: false
@@ -82,12 +92,18 @@
           {{ (vip_holder.results | selectattr('rc', 'equalto', 0)
               | map(attribute='item') | list) | first }}
 
+    - name: The highest priority node took the VIP
+      ansible.builtin.assert:
+        that:
+          - vip_master == groups['technitium_dns'][0]
+        fail_msg: "Expected {{ groups['technitium_dns'][0] }} to hold the VIP, got {{ vip_master }}"
+
     - name: The VIP resolves the clustered zone
       ansible.builtin.command:
-        argv: [dig, +short, "@{{ vip_address }}", www.lab.molecule.test, A]
+        argv: [dig, +short, "@{{ cluster_vip }}", www.lab.molecule.test, A]
       register: vip_answer
       changed_when: false
-      failed_when: vip_address not in vip_answer.stdout
+      failed_when: cluster_vip not in vip_answer.stdout
 
     - name: Stop keepalived on the master to force a failover
       ansible.builtin.systemd_service:
@@ -95,32 +111,46 @@
         state: stopped
       delegate_to: "{{ vip_master }}"
 
-    - name: Wait for a backup to take the VIP over
+    - name: A backup takes the VIP over and still answers
       ansible.builtin.command:
-        argv: [dig, +short, "+time=2", "+tries=1", "@{{ vip_address }}",
+        argv: [dig, +short, "+time=2", "+tries=1", "@{{ cluster_vip }}",
                www.lab.molecule.test, A]
       register: failover_answer
       changed_when: false
-      until: vip_address in failover_answer.stdout
+      until: cluster_vip in failover_answer.stdout
       retries: 15
       delay: 2
 
-    - name: The VIP moved to a different node
+    - name: Exactly one backup picked the VIP up
       ansible.builtin.shell:
-        cmd: "ip -4 addr show | grep -qw {{ vip_address }}"
+        cmd: "ip -4 addr show | grep -qw {{ cluster_vip }}"
       register: new_holder
       changed_when: false
       failed_when: false
       delegate_to: "{{ item }}"
       loop: "{{ groups['technitium_dns'] | difference([vip_master]) }}"
 
-    - name: Exactly one backup picked it up
+    - name: Confirm the takeover
       ansible.builtin.assert:
         that:
           - new_holder.results | selectattr('rc', 'equalto', 0) | list | length == 1
+        fail_msg: >-
+          After stopping keepalived on {{ vip_master }}, the VIP is held by
+          {{ new_holder.results | selectattr('rc', 'equalto', 0)
+             | map(attribute='item') | list }}
 
     - name: Restore keepalived on the original master
       ansible.builtin.systemd_service:
         name: keepalived
         state: started
+      delegate_to: "{{ vip_master }}"
+
+    - name: The VIP returns to the highest priority node
+      ansible.builtin.shell:
+        cmd: "ip -4 addr show | grep -qw {{ cluster_vip }}"
+      register: preempt_check
+      changed_when: false
+      until: preempt_check.rc == 0
+      retries: 15
+      delay: 2
       delegate_to: "{{ vip_master }}"
