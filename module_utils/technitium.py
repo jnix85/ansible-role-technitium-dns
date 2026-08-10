@@ -268,13 +268,8 @@ class TechnitiumClient(object):
     # --------------------------------------------------------------- requests
 
     def status(self):
-        """``/api/status`` needs no authentication and reports ``hasDefaultCredentials``.
-
-        Unlike every other call it returns its fields at the top level rather than
-        nested under ``response``, so the envelope must not be unwrapped.
-        """
-        return self._request('/api/status', authenticated=False, method='GET',
-                             unwrap=False)
+        """``/api/status`` needs no authentication and reports ``hasDefaultCredentials``."""
+        return self._request('/api/status', authenticated=False, method='GET')
 
     def get(self, path, params=None):
         return self.call(path, params=params, method='GET')
@@ -313,7 +308,7 @@ class TechnitiumClient(object):
         return self._request(path, params=call_params, body=body, method=method)
 
     def _request(self, path, params=None, body=None, method='POST',
-                 authenticated=True, unwrap=True):
+                 authenticated=True):
         query = serialize_params(params)
         headers = {'Accept': 'application/json'}
         if authenticated:
@@ -337,7 +332,7 @@ class TechnitiumClient(object):
         last_error = None
         for attempt in range(self.retries):
             try:
-                return self._fetch(url, data, headers, method, unwrap)
+                return self._fetch(url, data, headers, method)
             except TechnitiumError as exc:
                 # Only transport/server faults are worth retrying; a rejected request
                 # will be rejected again.
@@ -346,7 +341,7 @@ class TechnitiumClient(object):
                 last_error = exc
         raise last_error  # pragma: no cover - loop always returns or raises
 
-    def _fetch(self, url, data, headers, method, unwrap=True):
+    def _fetch(self, url, data, headers, method):
         response, info = fetch_url(
             self.module, url, data=data, headers=headers,
             method=method, timeout=self.timeout,
@@ -388,9 +383,15 @@ class TechnitiumClient(object):
 
         api_status = payload.get('status')
         if api_status == 'ok':
-            if not unwrap:
-                return payload
-            return payload.get('response', {})
+            # Most calls wrap their data as {"status": "ok", "response": {...}}.
+            # A handful - /api/status, user/login, user/createToken,
+            # user/createSingleUseToken - put their fields at the top level
+            # instead, alongside "status", with no "response" key at all.
+            # Detecting the shape here means every caller gets the right one
+            # without needing to know which category its endpoint falls into.
+            if 'response' in payload:
+                return payload['response']
+            return payload
         if api_status == 'invalid-token':
             raise TechnitiumError(
                 'The API token was rejected. Supply a valid api_token, or '
