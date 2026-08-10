@@ -88,6 +88,13 @@ class TestValuesEqual:
         (None, ''),
         (None, None),
         ('  spaced  ', 'spaced'),
+        # Technitium's web service settings never persist a redundant
+        # "0.0.0.0" once "[::]" is also declared - the IPv6 wildcard bind
+        # already covers IPv4 in dual-stack mode - so this must not read as
+        # permanent drift.
+        (['[::]'], ['0.0.0.0', '[::]']),
+        (['::'], ['0.0.0.0', '::']),
+        (['[::]:53'], ['0.0.0.0:53', '[::]:53']),
     ])
     def test_equal(self, current, desired):
         assert values_equal(current, desired)
@@ -99,6 +106,11 @@ class TestValuesEqual:
         (['1.1.1.1', '9.9.9.9'], ['9.9.9.9', '1.1.1.1']),
         ('', 'something'),
         (['a'], []),
+        # No IPv6 wildcard present to subsume it: 0.0.0.0 is a real, missing
+        # entry, not the dual-stack special case.
+        (['9.9.9.9'], ['0.0.0.0', '9.9.9.9']),
+        # The IPv6 wildcard alone does not silently excuse other real diffs.
+        (['[::]'], ['0.0.0.0', '[::]', '10.0.0.1']),
     ])
     def test_not_equal(self, current, desired):
         assert not values_equal(current, desired)

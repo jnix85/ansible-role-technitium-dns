@@ -142,7 +142,22 @@ def values_equal(current, desired):
     if isinstance(desired_n, list) or isinstance(current_n, list):
         current_list = current_n if isinstance(current_n, list) else _split_csv(current_n)
         desired_list = desired_n if isinstance(desired_n, list) else _split_csv(desired_n)
-        return [str(item) for item in current_list] == [str(item) for item in desired_list]
+        current_strs = [str(item) for item in current_list]
+        desired_strs = [str(item) for item in desired_list]
+        if current_strs == desired_strs:
+            return True
+        # An IPv6 wildcard bind subsumes the IPv4 wildcard in dual-stack mode,
+        # and Technitium's web service settings persist only the IPv6 entry
+        # when both are declared - "0.0.0.0" (or "0.0.0.0:<port>") never
+        # comes back from settings/get once "[::]" is also present, so it
+        # would otherwise look like a permanent, unfixable drift. Only drop
+        # entries this specific, well-defined way; everything else about list
+        # comparison stays a strict, order-sensitive equality check.
+        reduced_desired = [
+            item for item in desired_strs
+            if not _ipv4_any_subsumed_by_ipv6_any(item, current_strs)
+        ]
+        return current_strs == reduced_desired
 
     if isinstance(current_n, bool) or isinstance(desired_n, bool):
         return bool(current_n) == bool(desired_n)
@@ -158,6 +173,17 @@ def values_equal(current, desired):
         return _is_empty(current_n) and _is_empty(desired_n)
 
     return str(current_n) == str(desired_n)
+
+
+def _ipv4_any_subsumed_by_ipv6_any(item, current_strs):
+    """True when ``item`` is an IPv4-any address the IPv6-any entry covers."""
+    if item == '0.0.0.0':
+        suffix = ''
+    elif item.startswith('0.0.0.0:'):
+        suffix = item[len('0.0.0.0'):]
+    else:
+        return False
+    return ('[::]' + suffix) in current_strs or ('::' + suffix) in current_strs
 
 
 def _is_empty(value):
