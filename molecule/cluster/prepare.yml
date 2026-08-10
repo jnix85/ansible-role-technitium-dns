@@ -1,7 +1,6 @@
 ---
 - name: Prepare the test containers
   hosts: all
-  become: true
   gather_facts: true
 
   tasks:

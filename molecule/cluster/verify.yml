@@ -1,7 +1,6 @@
 ---
 - name: Verify clustering and VRRP failover
   hosts: technitium_dns
-  become: true
 
   vars:
     technitium_dns_admin_password: molecule-test-password
@@ -44,17 +43,21 @@
           zones present: {{ technitium.zones | map(attribute='name') | list }}
 
 
+# One host drives this: run_once is a task keyword, not a play keyword, so
+# scoping the play instead is what actually stops the failover test running
+# three times over. Facts are gathered because the VIP is derived from them -
+# set_fact in converge.yml does not survive into this separate playbook run.
 - name: Verify the VIP answers, and moves when the master steps aside
-  hosts: technitium_dns
-  become: true
-  gather_facts: false
-  run_once: true
+  hosts: technitium_dns[0]
+  gather_facts: true
+
+  vars:
+    vip_address: "{{ ansible_default_ipv4.address.split('.')[:3] | join('.') }}.250"
 
   tasks:
     - name: Find the node currently holding the VIP
       ansible.builtin.shell:
-        cmd: >-
-          ip -4 addr show | grep -qw {{ hostvars[item].technitium_dns_cluster_vip }}
+        cmd: "ip -4 addr show | grep -qw {{ vip_address }}"
       register: vip_holder
       changed_when: false
       failed_when: false
@@ -76,8 +79,6 @@
         vip_master: >-
           {{ (vip_holder.results | selectattr('rc', 'equalto', 0)
               | map(attribute='item') | list) | first }}
-        vip_address: >-
-          {{ hostvars[groups['technitium_dns'][0]].technitium_dns_cluster_vip }}
 
     - name: The VIP resolves the clustered zone
       ansible.builtin.command:

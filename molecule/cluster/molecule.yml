@@ -16,7 +16,6 @@ driver:
 platforms:
   - name: technitium-ns1
     image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
-    command: /lib/systemd/systemd
     privileged: true
     pre_build_image: true
     cgroupns_mode: host
@@ -29,7 +28,6 @@ platforms:
 
   - name: technitium-ns2
     image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
-    command: /lib/systemd/systemd
     privileged: true
     pre_build_image: true
     cgroupns_mode: host
@@ -42,7 +40,6 @@ platforms:
 
   - name: technitium-ns3
     image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
-    command: /lib/systemd/systemd
     privileged: true
     pre_build_image: true
     cgroupns_mode: host
@@ -58,6 +55,25 @@ provisioner:
   env:
     ANSIBLE_LIBRARY: "${MOLECULE_PROJECT_DIRECTORY}/library"
     ANSIBLE_MODULE_UTILS: "${MOLECULE_PROJECT_DIRECTORY}/module_utils"
+  inventory:
+    # Scoped to the containers by name, not to "all": molecule's own create and
+    # destroy playbooks run against localhost, which must keep its own user.
+    host_vars:
+      technitium-ns1:
+        ansible_user: root
+        # The containers already run as root. Attempting sudo there fails with
+        # "PAM account management error", and it buys nothing.
+        ansible_become: false
+      technitium-ns2:
+        ansible_user: root
+        # The containers already run as root. Attempting sudo there fails with
+        # "PAM account management error", and it buys nothing.
+        ansible_become: false
+      technitium-ns3:
+        ansible_user: root
+        # The containers already run as root. Attempting sudo there fails with
+        # "PAM account management error", and it buys nothing.
+        ansible_become: false
   config_options:
     defaults:
       callbacks_enabled: profile_tasks

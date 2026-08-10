@@ -1,7 +1,6 @@
 ---
 - name: Converge a single Technitium DNS node
   hosts: all
-  become: true
 
   vars:
     technitium_dns_admin_password: molecule-test-password

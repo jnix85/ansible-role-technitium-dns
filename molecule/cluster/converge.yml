@@ -1,7 +1,6 @@
 ---
 - name: Converge a three node cluster with a floating VIP
   hosts: technitium_dns
-  become: true
   strategy: linear
 
   vars:
@@ -30,7 +29,11 @@
             data:
               ipAddress: "{{ technitium_dns_cluster_vip }}"
 
-    # The VIP is picked from the container network at create time; see prepare.yml.
+    # A high address on the container network, which docker allocates from the
+    # bottom upwards. verify.yml derives the same address the same way, so the
+    # two playbooks agree without sharing facts.
+    technitium_dns_cluster_vip: "{{ ansible_default_ipv4.address.split('.')[:3] | join('.') }}.250"
+
     technitium_dns_keepalived_enabled: true
     technitium_dns_keepalived_instances:
       - name: DNS_VIP
@@ -39,18 +42,10 @@
         priority: "{{ 150 - (groups['technitium_dns'].index(inventory_hostname) * 10) }}"
         virtual_ipaddresses:
           - address: "{{ technitium_dns_cluster_vip }}"
-            prefix: "{{ ansible_default_ipv4.netmask | ansible.utils.ipaddr('prefix') }}"
+            prefix: "{{ ansible_default_ipv4.prefix | default(24) }}"
         authentication:
           auth_type: PASS
           auth_pass: molecule
-
-  pre_tasks:
-    - name: Choose a VIP on the container network
-      ansible.builtin.set_fact:
-        technitium_dns_cluster_vip: >-
-          {{ (ansible_default_ipv4.network ~ '/' ~
-              (ansible_default_ipv4.netmask | ansible.utils.ipaddr('prefix')))
-             | ansible.utils.ipaddr('250') | ansible.utils.ipaddr('address') }}
 
   roles:
     - role: ansible-role-technitium-dns

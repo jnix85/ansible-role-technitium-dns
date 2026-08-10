@@ -12,14 +12,11 @@ driver:
 platforms:
   - name: technitium-default
     image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
-    command: /lib/systemd/systemd
     privileged: true
     pre_build_image: true
     cgroupns_mode: host
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
-    published_ports:
-      - "0.0.0.0:5380:5380/tcp"
 
 provisioner:
   name: ansible
@@ -28,6 +25,15 @@ provisioner:
   env:
     ANSIBLE_LIBRARY: "${MOLECULE_PROJECT_DIRECTORY}/library"
     ANSIBLE_MODULE_UTILS: "${MOLECULE_PROJECT_DIRECTORY}/module_utils"
+  inventory:
+    # Scoped to the containers by name, not to "all": molecule's own create and
+    # destroy playbooks run against localhost, which must keep its own user.
+    host_vars:
+      technitium-default:
+        ansible_user: root
+        # The containers already run as root. Attempting sudo there fails with
+        # "PAM account management error", and it buys nothing.
+        ansible_become: false
   config_options:
     defaults:
       callbacks_enabled: profile_tasks
