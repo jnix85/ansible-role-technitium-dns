@@ -4,14 +4,32 @@
   gather_facts: true
 
   tasks:
+    # Read the role's own package names rather than repeating them here, so the
+    # test cannot drift from what the role installs on each distribution.
+    - name: Load the role's OS specific variables
+      ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
+      vars:
+        params:
+          files:
+            - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+            - "{{ ansible_distribution }}.yml"
+            - "{{ ansible_os_family }}.yml"
+            - default.yml
+          paths:
+            - "{{ playbook_dir }}/../../vars"
+
+    - name: Refresh the package cache, exactly as the role does
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../../tasks/package_cache.yml"
+
     # verify.yml queries the server with dig to prove records resolve over the
-    # wire. The role only installs a DNS client when the keepalived health check
-    # needs one, and this scenario does not enable keepalived.
+    # wire. The role only installs a DNS client when the keepalived
+    # health check needs one, and this scenario does not enable keepalived.
     - name: Install a DNS client for the verify playbook
       ansible.builtin.package:
-        name: "{{ 'bind-utils' if ansible_os_family == 'RedHat' else 'dnsutils' }}"
+        name: "{{ technitium_dns_dns_client_packages }}"
         state: present
       register: dns_client
       until: dns_client is succeeded
       retries: 3
       delay: 5
+      when: technitium_dns_dns_client_packages | length > 0

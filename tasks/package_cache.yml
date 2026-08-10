@@ -1,0 +1,20 @@
+---
+# ansible.builtin.package never refreshes the apt cache, and a freshly
+# provisioned Debian host - or any container image, which ships with the lists
+# pruned - has an empty one. Every later install then fails with the unhelpful
+# "No package matching '<name>' is available".
+#
+# cache_valid_time makes repeat calls cheap, so this is included wherever the
+# role installs packages rather than being assumed to have run already.
+
+- name: Refresh the apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_pkg_mgr == 'apt'
+  register: technitium_dns_apt_cache
+  until: technitium_dns_apt_cache is succeeded
+  retries: 3
+  delay: 5
+  # Refreshing a package cache is not a configuration change.
+  changed_when: false

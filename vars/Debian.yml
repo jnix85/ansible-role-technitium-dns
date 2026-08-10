@@ -11,7 +11,8 @@ technitium_dns_dotnet_packages:
 
 technitium_dns_dotnet_binary: /usr/bin/dotnet
 
+# Not "dnsutils": that was a transitional package, dropped in Ubuntu 24.04.
 technitium_dns_dns_client_packages:
-  - dnsutils
+  - bind9-dnsutils
 
 technitium_dns_firewall_default_backend: ufw

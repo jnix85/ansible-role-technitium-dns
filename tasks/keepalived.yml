@@ -3,6 +3,11 @@
 # Technitium clustering: clustering keeps configuration identical across nodes,
 # VRRP decides which node currently answers on the VIP.
 
+# Included again because this file also runs on its own via --tags keepalived.
+# cache_valid_time makes it a no-op when install.yml already refreshed.
+- name: Refresh the package cache
+  ansible.builtin.include_tasks: package_cache.yml
+
 - name: Install keepalived
   ansible.builtin.package:
     name: "{{ technitium_dns_keepalived_package }}"

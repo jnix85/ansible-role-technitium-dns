@@ -1,4 +1,7 @@
 ---
+- name: Refresh the package cache
+  ansible.builtin.import_tasks: package_cache.yml
+
 - name: Install prerequisite packages
   ansible.builtin.package:
     name: "{{ technitium_dns_prerequisite_packages }}"
