@@ -32,6 +32,11 @@ provisioner:
   env:
     ANSIBLE_LIBRARY: "${MOLECULE_PROJECT_DIRECTORY}/library"
     ANSIBLE_MODULE_UTILS: "${MOLECULE_PROJECT_DIRECTORY}/module_utils"
+  # An idempotence failure otherwise only names the non-idempotent task, not
+  # what changed. Every module here already returns a diff key; --diff is
+  # what makes ansible print it.
+  options:
+    diff: true
   inventory:
     # Scoped to the container by name, not to "all": molecule's own create and
     # destroy playbooks run against localhost, which must keep its own user.

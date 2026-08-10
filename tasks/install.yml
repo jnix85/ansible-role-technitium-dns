@@ -2,10 +2,30 @@
 - name: Refresh the package cache
   ansible.builtin.import_tasks: package_cache.yml
 
+# RHEL 9+ minimal images ship curl-minimal to satisfy the curl capability
+# while keeping image size down. It owns the same files as the full curl
+# package, so a plain package install of "curl" is rejected outright:
+#   Problem: problem with installed package curl-minimal-...
+#     - ... conflicts with curl provided by curl-...
+# allowerasing lets dnf swap it for the full package instead of refusing.
+# ansible.builtin.package doesn't expose that option, so dnf is used
+# directly here; every EL version this role supports (9, 10) uses dnf.
+- name: Install prerequisite packages (dnf, allowing package swaps)
+  ansible.builtin.dnf:
+    name: "{{ technitium_dns_prerequisite_packages }}"
+    state: present
+    allowerasing: true
+  when: ansible_pkg_mgr == 'dnf'
+  register: technitium_dns_prereq_dnf
+  until: technitium_dns_prereq_dnf is succeeded
+  retries: 3
+  delay: 5
+
 - name: Install prerequisite packages
   ansible.builtin.package:
     name: "{{ technitium_dns_prerequisite_packages }}"
     state: present
+  when: ansible_pkg_mgr != 'dnf'
   register: technitium_dns_prereq
   until: technitium_dns_prereq is succeeded
   retries: 3

@@ -127,8 +127,11 @@ def run(client):
         domains=sorted(to_add | to_remove),
         added=sorted(to_add),
         removed=sorted(to_remove),
-        diff=dict(before=sorted(existing),
-                  after=sorted((existing | to_add) - to_remove)),
+        # diff.before/after must be dicts (or strings) for Ansible's --diff
+        # renderer; a bare list makes it fail with "'list' object has no
+        # attribute 'splitlines'" instead of showing anything.
+        diff=dict(before={'domains': sorted(existing)},
+                  after={'domains': sorted((existing | to_add) - to_remove)}),
     )
 
 
