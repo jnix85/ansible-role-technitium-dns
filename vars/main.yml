@@ -1,0 +1,41 @@
+---
+# Computed values. These are role internals; override the variables in
+# defaults/main.yml instead.
+
+# Who owns the configuration that clustering replicates. Without clustering every
+# node owns its own; with clustering only the primary does, because a secondary's
+# copy is overwritten from the primary on every sync.
+technitium_dns_manages_cluster_wide_config: >-
+  {{ (not technitium_dns_cluster_enabled | bool)
+     or technitium_dns_cluster_role == 'primary' }}
+
+# HTTPS URL of the primary node, used by secondaries when joining.
+technitium_dns_cluster_primary_url: >-
+  https://{{ hostvars[technitium_dns_cluster_primary].technitium_dns_node_domain
+             | default(technitium_dns_cluster_primary) }}:{{ technitium_dns_https_port }}/
+
+# Address of the primary node. Resolving the primary's name is a chicken-and-egg
+# problem when this cluster is the resolver, so an address is passed explicitly.
+technitium_dns_cluster_primary_ip_address: >-
+  {{ (hostvars[technitium_dns_cluster_primary].technitium_dns_cluster_node_ip_addresses
+      | default([]) | first)
+     | default(hostvars[technitium_dns_cluster_primary].ansible_host
+               | default(technitium_dns_cluster_primary), true) }}
+
+# Joining transfers the entire primary configuration, which can take a while.
+technitium_dns_cluster_join_timeout: 300
+
+technitium_dns_force_reinstall: false
+
+# Every other host in the play, for VRRP unicast peering.
+technitium_dns_keepalived_default_peers: >-
+  {{ ansible_play_hosts
+     | difference([inventory_hostname])
+     | map('extract', hostvars, 'ansible_default_ipv4')
+     | map(attribute='address', default='')
+     | reject('equalto', '')
+     | list }}
+
+# Token for the keepalived health check script's API call. Empty means the
+# script queries over DNS instead, which needs no credentials.
+technitium_dns_keepalived_health_check_api_token: ""

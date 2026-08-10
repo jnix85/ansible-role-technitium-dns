@@ -1,0 +1,38 @@
+---
+galaxy_info:
+  role_name: technitium_dns
+  namespace: jnix85
+  author: jnix85
+  description: >-
+    Install and declaratively configure Technitium DNS Server, its built-in
+    clustering, and keepalived VRRP for a floating service address.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - dns
+    - technitium
+    - keepalived
+    - vrrp
+    - clustering
+    - highavailability
+    - dhcp
+    - networking
+
+dependencies: []
+
+collections:
+  - ansible.posix
+  - community.general

@@ -1,0 +1,47 @@
+#!/bin/sh
+{{ ansible_managed | comment }}
+#
+# keepalived tracking script for the Technitium DNS Server.
+#
+# A process that is running but no longer resolving is worse than a dead one:
+# it holds the VIP and blackholes queries. So this checks resolution, not
+# liveness. Exit 0 keeps the VIP here, anything else gives it up.
+
+set -u
+
+DOMAIN='{{ technitium_dns_keepalived_health_check_domain }}'
+TYPE='{{ technitium_dns_keepalived_health_check_type }}'
+TIMEOUT='{{ technitium_dns_keepalived_health_check_timeout }}'
+
+{% if technitium_dns_keepalived_health_check_api_token | length > 0 %}
+# The server's own health check endpoint reports whether it can resolve, and
+# deliberately writes no query log entries. It needs DnsClient: View permission.
+TOKEN_FILE='{{ technitium_dns_keepalived_script_dir }}/healthcheck.token'
+
+if [ -r "${TOKEN_FILE}" ] && command -v curl >/dev/null 2>&1; then
+    response=$(curl -fsS --max-time "${TIMEOUT}" \
+        -H "Authorization: Bearer $(cat "${TOKEN_FILE}")" \
+        "{{ technitium_dns_api_url }}/api/dnsClient/healthCheck?domain=${DOMAIN}&type=${TYPE}" \
+        2>/dev/null) || response=''
+    case "${response}" in
+        *'"status"'*'"ok"'*) exit 0 ;;
+        *) exit 1 ;;
+    esac
+fi
+
+{% endif %}
+# Query over the wire. A non-zero exit means no usable reply arrived, which is
+# the failure that matters; NXDOMAIN still proves the server is answering. For a
+# stricter check that distinguishes SERVFAIL, set
+# technitium_dns_keepalived_health_check_api_token and use the API branch above.
+if command -v dig >/dev/null 2>&1; then
+    dig +short +tries=1 "+time=${TIMEOUT}" @127.0.0.1 "${DOMAIN}" "${TYPE}" \
+        >/dev/null 2>&1 && exit 0
+elif command -v nslookup >/dev/null 2>&1; then
+    nslookup -type="${TYPE}" -timeout="${TIMEOUT}" "${DOMAIN}" 127.0.0.1 \
+        >/dev/null 2>&1 && exit 0
+elif command -v host >/dev/null 2>&1; then
+    host -W "${TIMEOUT}" -t "${TYPE}" "${DOMAIN}" 127.0.0.1 >/dev/null 2>&1 && exit 0
+fi
+
+exit 1

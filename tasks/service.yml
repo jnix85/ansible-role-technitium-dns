@@ -1,0 +1,73 @@
+---
+# systemd-resolved's stub listener owns 127.0.0.53:53 and, on some distributions,
+# the DNS port generally. Technitium cannot bind 0.0.0.0:53 while it is there.
+- name: Check for systemd-resolved
+  ansible.builtin.stat:
+    path: /run/systemd/resolve/stub-resolv.conf
+  register: technitium_dns_resolved_stub
+  when: technitium_dns_disable_systemd_resolved_stub | bool
+
+- name: Disable the systemd-resolved stub listener
+  when:
+    - technitium_dns_disable_systemd_resolved_stub | bool
+    - technitium_dns_resolved_stub.stat.exists | default(false)
+  block:
+    - name: Create the systemd-resolved drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Turn off the stub listener
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf.d/00-technitium.conf
+        content: |
+          # Managed by ansible-role-technitium-dns
+          # Technitium DNS Server binds :53 itself, so the stub listener must go.
+          [Resolve]
+          DNSStubListener=no
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart systemd-resolved
+
+    - name: Point /etc/resolv.conf at the real resolver file
+      ansible.builtin.file:
+        src: /run/systemd/resolve/resolv.conf
+        dest: /etc/resolv.conf
+        state: link
+        force: true
+
+    - name: Apply the resolved change before starting the DNS server
+      ansible.builtin.meta: flush_handlers
+
+- name: Ensure the Technitium DNS Server service is running
+  ansible.builtin.systemd_service:
+    name: "{{ technitium_dns_service_name }}"
+    enabled: "{{ technitium_dns_service_enabled }}"
+    state: "{{ technitium_dns_service_state }}"
+    daemon_reload: true
+
+- name: Wait for the web service to accept connections
+  ansible.builtin.wait_for:
+    host: "{{ technitium_dns_api_host }}"
+    port: "{{ technitium_dns_api_port }}"
+    timeout: 120
+
+# The port opens before the server finishes loading zones, so wait for the API
+# to actually answer rather than assuming a live socket means ready.
+- name: Wait for the API to become ready
+  ansible.builtin.uri:
+    url: "{{ technitium_dns_api_url }}/api/status"
+    validate_certs: "{{ technitium_dns_api_validate_certs }}"
+    timeout: "{{ technitium_dns_api_timeout }}"
+    return_content: true
+  register: technitium_dns_api_status
+  until:
+    - technitium_dns_api_status.status == 200
+    - (technitium_dns_api_status.json | default({})).status | default('') == 'ok'
+  retries: 30
+  delay: 2
+  changed_when: false

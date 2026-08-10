@@ -1,0 +1,56 @@
+---
+- name: Converge a three node cluster with a floating VIP
+  hosts: technitium_dns
+  become: true
+  strategy: linear
+
+  vars:
+    technitium_dns_admin_password: molecule-test-password
+    technitium_dns_node_domain: "{{ inventory_hostname | replace('technitium-', '') }}.molecule.test"
+
+    technitium_dns_cluster_enabled: true
+    technitium_dns_cluster_domain: molecule.test
+    technitium_dns_cluster_primary: technitium-ns1
+
+    technitium_dns_settings:
+      recursion: AllowOnlyForPrivateNetworks
+      dnssecValidation: true
+      forwarders:
+        - 9.9.9.9
+      forwarderProtocol: Tcp
+
+    technitium_dns_zones:
+      - zone: lab.molecule.test
+        type: Primary
+        catalog: "{{ technitium_dns_cluster_catalog_zone }}"
+        records:
+          - domain: www.lab.molecule.test
+            type: A
+            exclusive: true
+            data:
+              ipAddress: "{{ technitium_dns_cluster_vip }}"
+
+    # The VIP is picked from the container network at create time; see prepare.yml.
+    technitium_dns_keepalived_enabled: true
+    technitium_dns_keepalived_instances:
+      - name: DNS_VIP
+        interface: "{{ ansible_default_ipv4.interface }}"
+        virtual_router_id: 51
+        priority: "{{ 150 - (groups['technitium_dns'].index(inventory_hostname) * 10) }}"
+        virtual_ipaddresses:
+          - address: "{{ technitium_dns_cluster_vip }}"
+            prefix: "{{ ansible_default_ipv4.netmask | ansible.utils.ipaddr('prefix') }}"
+        authentication:
+          auth_type: PASS
+          auth_pass: molecule
+
+  pre_tasks:
+    - name: Choose a VIP on the container network
+      ansible.builtin.set_fact:
+        technitium_dns_cluster_vip: >-
+          {{ (ansible_default_ipv4.network ~ '/' ~
+              (ansible_default_ipv4.netmask | ansible.utils.ipaddr('prefix')))
+             | ansible.utils.ipaddr('250') | ansible.utils.ipaddr('address') }}
+
+  roles:
+    - role: ansible-role-technitium-dns

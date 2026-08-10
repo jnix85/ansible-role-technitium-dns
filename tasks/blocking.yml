@@ -1,0 +1,29 @@
+---
+# The Allowed and Blocked zones are replicated by clustering, so they are
+# authored on the primary node only.
+
+- name: Manage the allowed zone
+  technitium_dns_blocklist:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    list: allowed
+    domains: "{{ technitium_dns_allowed_domains }}"
+    exclusive: "{{ technitium_dns_blocklist_exclusive }}"
+  when:
+    - technitium_dns_manages_cluster_wide_config | bool
+    - technitium_dns_allowed_domains | length > 0 or technitium_dns_blocklist_exclusive
+
+- name: Manage the blocked zone
+  technitium_dns_blocklist:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    list: blocked
+    domains: "{{ technitium_dns_blocked_domains }}"
+    exclusive: "{{ technitium_dns_blocklist_exclusive }}"
+  when:
+    - technitium_dns_manages_cluster_wide_config | bool
+    - technitium_dns_blocked_domains | length > 0 or technitium_dns_blocklist_exclusive

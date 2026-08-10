@@ -1,0 +1,36 @@
+---
+# The official installer pulls in the .NET runtime, unpacks the application and
+# installs the systemd unit. It is not idempotent, so it runs only when the
+# server is missing, or when explicitly asked to reinstall/upgrade.
+
+- name: Download the official installer
+  ansible.builtin.get_url:
+    url: "{{ technitium_dns_installer_url }}"
+    dest: /var/tmp/technitium-dns-install.sh
+    mode: "0700"
+    owner: root
+    group: root
+  register: technitium_dns_installer
+  until: technitium_dns_installer is succeeded
+  retries: 3
+  delay: 5
+
+- name: Run the official installer
+  ansible.builtin.command:
+    cmd: /bin/bash /var/tmp/technitium-dns-install.sh
+    creates: "{{ technitium_dns_install_dir }}/DnsServerApp.dll"
+  register: technitium_dns_install_run
+  when: not technitium_dns_force_reinstall | bool
+
+- name: Run the official installer to upgrade
+  ansible.builtin.command:
+    cmd: /bin/bash /var/tmp/technitium-dns-install.sh
+  register: technitium_dns_upgrade_run
+  changed_when: true
+  when: technitium_dns_force_reinstall | bool
+  notify: Restart Technitium DNS Server
+
+- name: Remove the installer
+  ansible.builtin.file:
+    path: /var/tmp/technitium-dns-install.sh
+    state: absent

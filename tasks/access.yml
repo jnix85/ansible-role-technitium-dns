@@ -1,0 +1,53 @@
+---
+# The Administration section is replicated by clustering, so users, groups and
+# permissions are authored on the primary node only.
+
+- name: Manage groups
+  technitium_dns_group:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    description: "{{ item.description | default(omit) }}"
+    members: "{{ item.members | default(omit) }}"
+  loop: "{{ technitium_dns_groups }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: technitium_dns_manages_cluster_wide_config | bool
+
+- name: Manage users
+  technitium_dns_user:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    username: "{{ item.username }}"
+    state: "{{ item.state | default('present') }}"
+    password: "{{ item.password | default(omit) }}"
+    update_password: "{{ item.update_password | default('on_create') }}"
+    display_name: "{{ item.display_name | default(omit) }}"
+    disabled: "{{ item.disabled | default(omit) }}"
+    session_timeout_seconds: "{{ item.session_timeout_seconds | default(omit) }}"
+    groups: "{{ item.groups | default(omit) }}"
+  loop: "{{ technitium_dns_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+  no_log: true
+  when: technitium_dns_manages_cluster_wide_config | bool
+
+- name: Manage permissions
+  technitium_dns_permission:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    section: "{{ item.section | default(omit) }}"
+    zone: "{{ item.zone | default(omit) }}"
+    users: "{{ item.users | default(omit) }}"
+    groups: "{{ item.groups | default(omit) }}"
+  loop: "{{ technitium_dns_permissions }}"
+  loop_control:
+    label: "{{ item.section | default(item.zone) | default('?') }}"
+  when: technitium_dns_manages_cluster_wide_config | bool

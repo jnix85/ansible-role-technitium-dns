@@ -1,0 +1,25 @@
+#!/bin/sh
+{{ ansible_managed | comment }}
+#
+# keepalived calls this on every VRRP state transition:
+#   $1 = INSTANCE|GROUP   $2 = name   $3 = MASTER|BACKUP|FAULT|STOP   $4 = priority
+#
+# Failover is invisible unless something records it, and "when did the VIP move"
+# is the first question asked after an incident.
+
+set -u
+
+TYPE="${1:-unknown}"
+NAME="${2:-unknown}"
+STATE="${3:-unknown}"
+PRIORITY="${4:-unknown}"
+
+logger -t keepalived-technitium -p daemon.notice \
+    "VRRP ${TYPE} ${NAME} -> ${STATE} (priority ${PRIORITY}) on $(hostname -f 2>/dev/null || hostname)"
+
+{% if technitium_dns_keepalived_notify_command | length > 0 %}
+# Site specific hook.
+{{ technitium_dns_keepalived_notify_command }} "${TYPE}" "${NAME}" "${STATE}" "${PRIORITY}"
+{% endif %}
+
+exit 0

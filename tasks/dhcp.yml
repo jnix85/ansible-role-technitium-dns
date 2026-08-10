@@ -1,0 +1,36 @@
+---
+# DHCP scopes are NOT replicated by clustering, so they are applied per node.
+# Two nodes serving the same subnet need split ranges, or only one node with the
+# scope enabled - define technitium_dns_dhcp_scopes in host_vars accordingly.
+
+- name: Manage DHCP scopes
+  technitium_dns_dhcp_scope:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    enabled: "{{ item.enabled | default(true) }}"
+    starting_address: "{{ item.starting_address | default(omit) }}"
+    ending_address: "{{ item.ending_address | default(omit) }}"
+    subnet_mask: "{{ item.subnet_mask | default(omit) }}"
+    router_address: "{{ item.router_address | default(omit) }}"
+    dns_servers: "{{ item.dns_servers | default(omit) }}"
+    use_this_dns_server: "{{ item.use_this_dns_server | default(omit) }}"
+    domain_name: "{{ item.domain_name | default(omit) }}"
+    domain_search_list: "{{ item.domain_search_list | default(omit) }}"
+    dns_updates: "{{ item.dns_updates | default(omit) }}"
+    dns_ttl: "{{ item.dns_ttl | default(omit) }}"
+    lease_time_days: "{{ item.lease_time_days | default(omit) }}"
+    lease_time_hours: "{{ item.lease_time_hours | default(omit) }}"
+    lease_time_minutes: "{{ item.lease_time_minutes | default(omit) }}"
+    ntp_servers: "{{ item.ntp_servers | default(omit) }}"
+    allow_only_reserved_leases: "{{ item.allow_only_reserved_leases | default(omit) }}"
+    exclusions: "{{ item.exclusions | default(omit) }}"
+    static_routes: "{{ item.static_routes | default(omit) }}"
+    reserved_leases: "{{ item.reserved_leases | default(omit) }}"
+    options: "{{ item.options | default(omit) }}"
+  loop: "{{ technitium_dns_dhcp_scopes }}"
+  loop_control:
+    label: "{{ item.name }}"

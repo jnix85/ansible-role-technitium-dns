@@ -1,0 +1,53 @@
+{{ ansible_managed | comment }}
+# Mirrors the unit shipped by upstream, with the paths this role uses.
+
+[Unit]
+Description=Technitium DNS Server
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ technitium_dns_user }}
+Group={{ technitium_dns_group }}
+SyslogIdentifier={{ technitium_dns_service_name }}
+
+WorkingDirectory={{ technitium_dns_install_dir }}
+ReadWritePaths={{ technitium_dns_config_dir }} {{ technitium_dns_log_dir }}
+{% for path in technitium_dns_service_read_only_paths | default([]) %}
+ReadOnlyPaths={{ path }}
+{% endfor %}
+
+Environment="OPENSSL_ENABLE_SHA1_SIGNATURES=1"
+{% for key, value in (technitium_dns_service_environment | default({})).items() %}
+Environment="{{ key }}={{ value }}"
+{% endfor %}
+
+ExecStart={{ technitium_dns_dotnet_binary }} {{ technitium_dns_install_dir }}/DnsServerApp.dll {{ technitium_dns_config_dir }}
+
+Restart=always
+RestartSec=10
+
+LockPersonality=true
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RemoveIPC=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

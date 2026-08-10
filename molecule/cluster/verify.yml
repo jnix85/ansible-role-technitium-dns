@@ -1,0 +1,123 @@
+---
+- name: Verify clustering and VRRP failover
+  hosts: technitium_dns
+  become: true
+
+  vars:
+    technitium_dns_admin_password: molecule-test-password
+
+  tasks:
+    - name: Read the cluster state from every node
+      technitium_dns_info:
+        api_url: http://127.0.0.1:5380
+        api_username: admin
+        api_password: "{{ technitium_dns_admin_password }}"
+        gather: [cluster, zones]
+      register: technitium
+
+    - name: Every node sees all three members, and all are reachable
+      ansible.builtin.assert:
+        that:
+          - technitium.cluster.clusterInitialized
+          - technitium.cluster.clusterDomain == 'molecule.test'
+          - technitium.cluster.nodes | length == 3
+          - technitium.cluster.nodes
+            | rejectattr('state', 'in', ['Self', 'Connected'])
+            | list | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }} sees
+          {{ technitium.cluster.nodes | map(attribute='name') | list }} in states
+          {{ technitium.cluster.nodes | map(attribute='state') | list }}
+
+    - name: Exactly one node is the primary
+      ansible.builtin.assert:
+        that:
+          - technitium.cluster.nodes | selectattr('type', 'equalto', 'Primary')
+            | list | length == 1
+
+    - name: The catalog member zone was provisioned on this node
+      ansible.builtin.assert:
+        that:
+          - "'lab.molecule.test' in technitium.zones | map(attribute='name') | list"
+        fail_msg: >-
+          Catalog provisioning did not reach {{ inventory_hostname }};
+          zones present: {{ technitium.zones | map(attribute='name') | list }}
+
+
+- name: Verify the VIP answers, and moves when the master steps aside
+  hosts: technitium_dns
+  become: true
+  gather_facts: false
+  run_once: true
+
+  tasks:
+    - name: Find the node currently holding the VIP
+      ansible.builtin.shell:
+        cmd: >-
+          ip -4 addr show | grep -qw {{ hostvars[item].technitium_dns_cluster_vip }}
+      register: vip_holder
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['technitium_dns'] }}"
+
+    - name: Exactly one node holds the VIP
+      ansible.builtin.assert:
+        that:
+          - holders | length == 1
+        fail_msg: "VIP held by {{ holders }} (expected exactly one node)"
+      vars:
+        holders: >-
+          {{ vip_holder.results | selectattr('rc', 'equalto', 0)
+             | map(attribute='item') | list }}
+
+    - name: Record the current master
+      ansible.builtin.set_fact:
+        vip_master: >-
+          {{ (vip_holder.results | selectattr('rc', 'equalto', 0)
+              | map(attribute='item') | list) | first }}
+        vip_address: >-
+          {{ hostvars[groups['technitium_dns'][0]].technitium_dns_cluster_vip }}
+
+    - name: The VIP resolves the clustered zone
+      ansible.builtin.command:
+        argv: [dig, +short, "@{{ vip_address }}", www.lab.molecule.test, A]
+      register: vip_answer
+      changed_when: false
+      failed_when: vip_address not in vip_answer.stdout
+
+    - name: Stop keepalived on the master to force a failover
+      ansible.builtin.systemd_service:
+        name: keepalived
+        state: stopped
+      delegate_to: "{{ vip_master }}"
+
+    - name: Wait for a backup to take the VIP over
+      ansible.builtin.command:
+        argv: [dig, +short, "+time=2", "+tries=1", "@{{ vip_address }}",
+               www.lab.molecule.test, A]
+      register: failover_answer
+      changed_when: false
+      until: vip_address in failover_answer.stdout
+      retries: 15
+      delay: 2
+
+    - name: The VIP moved to a different node
+      ansible.builtin.shell:
+        cmd: "ip -4 addr show | grep -qw {{ vip_address }}"
+      register: new_holder
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['technitium_dns'] | difference([vip_master]) }}"
+
+    - name: Exactly one backup picked it up
+      ansible.builtin.assert:
+        that:
+          - new_holder.results | selectattr('rc', 'equalto', 0) | list | length == 1
+
+    - name: Restore keepalived on the original master
+      ansible.builtin.systemd_service:
+        name: keepalived
+        state: started
+      delegate_to: "{{ vip_master }}"

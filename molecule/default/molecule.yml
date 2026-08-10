@@ -1,0 +1,47 @@
+---
+role_name_check: 1
+
+dependency:
+  name: galaxy
+  options:
+    requirements-file: molecule/requirements.yml
+
+driver:
+  name: docker
+
+platforms:
+  - name: technitium-default
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
+    command: /lib/systemd/systemd
+    privileged: true
+    pre_build_image: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    published_ports:
+      - "0.0.0.0:5380:5380/tcp"
+
+provisioner:
+  name: ansible
+  # The verify playbook does not include the role, so the role-local modules
+  # have to be put on the search path explicitly.
+  env:
+    ANSIBLE_LIBRARY: "${MOLECULE_PROJECT_DIRECTORY}/library"
+    ANSIBLE_MODULE_UTILS: "${MOLECULE_PROJECT_DIRECTORY}/module_utils"
+  config_options:
+    defaults:
+      callbacks_enabled: profile_tasks
+      stdout_callback: yaml
+  playbooks:
+    converge: converge.yml
+    verify: verify.yml
+
+scenario:
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - converge
+    - idempotence
+    - verify
+    - destroy

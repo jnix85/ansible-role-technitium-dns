@@ -1,0 +1,32 @@
+---
+# A fresh install accepts admin/admin. Replace that password and hold a token for
+# the rest of the play. Nothing is written to disk unless a named API token was
+# explicitly requested.
+
+- name: Take over the administrator account and obtain a token
+  technitium_dns_bootstrap:
+    api_url: "{{ technitium_dns_api_url }}"
+    validate_certs: "{{ technitium_dns_api_validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_timeout }}"
+    admin_username: "{{ technitium_dns_admin_username }}"
+    admin_password: "{{ technitium_dns_admin_password }}"
+    default_password: "{{ technitium_dns_default_admin_password }}"
+    create_api_token: "{{ technitium_dns_create_api_token }}"
+    api_token_name: "{{ technitium_dns_api_token_name }}"
+  register: technitium_dns_bootstrap_result
+  no_log: true
+  when: not technitium_dns_api_token | length
+
+- name: Hold the API token for the rest of the play
+  ansible.builtin.set_fact:
+    technitium_dns_token: >-
+      {{ technitium_dns_api_token if technitium_dns_api_token | length
+         else technitium_dns_bootstrap_result.token }}
+    technitium_dns_api_args:
+      api_url: "{{ technitium_dns_api_url }}"
+      validate_certs: "{{ technitium_dns_api_validate_certs }}"
+      api_timeout: "{{ technitium_dns_api_timeout }}"
+      api_token: >-
+        {{ technitium_dns_api_token if technitium_dns_api_token | length
+           else technitium_dns_bootstrap_result.token }}
+  no_log: true
