@@ -1,7 +1,6 @@
 ---
 - name: Verify clustering and VRRP failover
   hosts: technitium_dns
-  become: true
 
   vars:
     technitium_dns_admin_password: molecule-test-password
@@ -50,7 +49,6 @@
 # set_fact in converge.yml does not survive into this separate playbook run.
 - name: Verify the VIP answers, and moves when the master steps aside
   hosts: technitium_dns[0]
-  become: true
   gather_facts: true
 
   vars:

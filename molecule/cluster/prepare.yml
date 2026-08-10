@@ -2,16 +2,20 @@
 - name: Prepare the test containers
   hosts: all
   # Facts are gathered explicitly below: gathering runs before any task, and
-  # until systemd is up the nss and PAM lookups it needs will fail.
+  # until systemd is up the nss lookups it needs can fail.
   gather_facts: false
+  # The container connection is already root (see molecule.yml host_vars):
+  # become/sudo is both unnecessary here and unreliable this early in boot,
+  # since sudo's PAM account-management phase needs dbus/systemd-logind,
+  # which can still be settling for a few seconds after systemd itself
+  # reports "running".
   become: false
 
   tasks:
-    # systemd is still booting when molecule moves on from create. Until it is
-    # up, PAM cannot resolve accounts - which is what produced the earlier
-    # "sudo: PAM account management error" - and the Technitium installer
-    # refuses to run at all with "systemd/openrc was not detected".
-    # raw needs neither python nor become, so it works before either is usable.
+    # systemd is still booting when molecule moves on from create. The
+    # Technitium installer refuses to run at all until it is up, with
+    # "systemd/openrc was not detected". raw needs neither python nor
+    # become, so it works regardless of what else is or isn't ready yet.
     - name: Wait for systemd to finish booting
       ansible.builtin.raw: systemctl is-system-running --wait
       register: systemd_state
@@ -21,7 +25,6 @@
 
     - name: Gather facts now that the system is up
       ansible.builtin.setup:
-      become: true
 
     # Read the role's own package names rather than repeating them here, so the
     # test cannot drift from what the role installs on each distribution.
@@ -38,9 +41,7 @@
             - "{{ playbook_dir }}/../../vars"
 
     - name: Refresh the package cache, exactly as the role does
-      become: true
-      block:
-        - ansible.builtin.include_tasks: "{{ playbook_dir }}/../../tasks/package_cache.yml"
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../../tasks/package_cache.yml"
 
     # verify.yml queries the server with dig to prove records resolve over the
     # wire. The role installs one here anyway for the keepalived health
@@ -49,7 +50,6 @@
       ansible.builtin.package:
         name: "{{ technitium_dns_dns_client_packages }}"
         state: present
-      become: true
       register: dns_client
       until: dns_client is succeeded
       retries: 3
