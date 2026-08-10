@@ -61,10 +61,14 @@ provisioner:
   config_options:
     defaults:
       callbacks_enabled: profile_tasks
-      stdout_callback: yaml
+      # Not stdout_callback: yaml - that resolves to community.general.yaml,
+      # which was removed in community.general 12.0.0. The built-in default
+      # callback does the same job through this option.
+      callback_result_format: yaml
       # Secondaries must not race ahead of the primary's cluster init.
       strategy: linear
   playbooks:
+    prepare: prepare.yml
     converge: converge.yml
     verify: verify.yml
 
@@ -73,6 +77,7 @@ scenario:
     - dependency
     - destroy
     - create
+    - prepare
     - converge
     - idempotence
     - verify

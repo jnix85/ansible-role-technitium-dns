@@ -1,0 +1,17 @@
+---
+- name: Prepare the test containers
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    # The role installs a DNS client here anyway (the keepalived health check
+    # needs one), but verify.yml must not depend on that ordering.
+    - name: Install a DNS client for the verify playbook
+      ansible.builtin.package:
+        name: "{{ 'bind-utils' if ansible_os_family == 'RedHat' else 'dnsutils' }}"
+        state: present
+      register: dns_client
+      until: dns_client is succeeded
+      retries: 3
+      delay: 5
