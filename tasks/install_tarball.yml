@@ -1,0 +1,91 @@
+---
+# Self-managed install: everything the official installer does, but under this
+# role's control, so the version is pinned and the source can be an internal
+# mirror or a file already on disk.
+
+- name: Install the .NET runtime
+  ansible.builtin.package:
+    name: "{{ technitium_dns_dotnet_packages }}"
+    state: present
+  register: technitium_dns_dotnet
+  until: technitium_dns_dotnet is succeeded
+  retries: 3
+  delay: 5
+
+- name: Create the service group
+  ansible.builtin.group:
+    name: "{{ technitium_dns_group }}"
+    system: true
+    state: present
+
+- name: Create the service user
+  ansible.builtin.user:
+    name: "{{ technitium_dns_user }}"
+    group: "{{ technitium_dns_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ technitium_dns_install_dir }}"
+    create_home: false
+    state: present
+
+- name: Create the application, config and log directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ technitium_dns_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ technitium_dns_install_dir }}", owner: root, mode: "0755"}
+    - {path: "{{ technitium_dns_config_dir }}", owner: "{{ technitium_dns_user }}", mode: "0750"}
+    - {path: "{{ technitium_dns_log_dir }}", owner: "{{ technitium_dns_user }}", mode: "0750"}
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Stage the portable tarball from the control node
+  ansible.builtin.copy:
+    src: "{{ technitium_dns_tarball_local_path }}"
+    dest: /var/tmp/DnsServerPortable.tar.gz
+    mode: "0600"
+    owner: root
+    group: root
+  register: technitium_dns_tarball_staged
+  when: technitium_dns_tarball_local_path | length > 0
+
+- name: Download the portable tarball
+  ansible.builtin.get_url:
+    url: "{{ technitium_dns_tarball_url }}"
+    dest: /var/tmp/DnsServerPortable.tar.gz
+    mode: "0600"
+    owner: root
+    group: root
+    checksum: "{{ technitium_dns_tarball_checksum | default(omit) }}"
+  register: technitium_dns_tarball_downloaded
+  until: technitium_dns_tarball_downloaded is succeeded
+  retries: 3
+  delay: 5
+  when: technitium_dns_tarball_local_path | length == 0
+
+- name: Unpack the application
+  ansible.builtin.unarchive:
+    src: /var/tmp/DnsServerPortable.tar.gz
+    dest: "{{ technitium_dns_install_dir }}"
+    remote_src: true
+    owner: root
+    group: "{{ technitium_dns_group }}"
+  when: >-
+    not technitium_dns_already_installed
+    or technitium_dns_tarball_downloaded is changed
+    or technitium_dns_tarball_staged is changed
+  notify: Restart Technitium DNS Server
+
+- name: Install the systemd unit
+  ansible.builtin.template:
+    src: technitium-dns.service.j2
+    dest: "/etc/systemd/system/{{ technitium_dns_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart Technitium DNS Server

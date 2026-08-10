@@ -1,0 +1,15 @@
+---
+# Fallback for distributions without a dedicated vars file. The script install
+# method works here because the upstream installer handles the runtime itself.
+technitium_dns_prerequisite_packages:
+  - curl
+  - tar
+
+technitium_dns_dotnet_packages:
+  - aspnetcore-runtime-8.0
+
+technitium_dns_dotnet_binary: /usr/bin/dotnet
+
+technitium_dns_dns_client_packages: []
+
+technitium_dns_firewall_default_backend: firewalld

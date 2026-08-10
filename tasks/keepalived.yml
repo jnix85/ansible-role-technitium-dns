@@ -1,0 +1,109 @@
+---
+# keepalived provides the floating service address. This is orthogonal to
+# Technitium clustering: clustering keeps configuration identical across nodes,
+# VRRP decides which node currently answers on the VIP.
+
+# Included again because this file also runs on its own via --tags keepalived.
+# cache_valid_time makes it a no-op when install.yml already refreshed.
+- name: Refresh the package cache
+  ansible.builtin.include_tasks: package_cache.yml
+
+- name: Install keepalived
+  ansible.builtin.package:
+    name: "{{ technitium_dns_keepalived_package }}"
+    state: present
+  register: technitium_dns_keepalived_pkg
+  until: technitium_dns_keepalived_pkg is succeeded
+  retries: 3
+  delay: 5
+
+- name: Install a DNS client for the health check script
+  ansible.builtin.package:
+    name: "{{ technitium_dns_dns_client_packages }}"
+    state: present
+  when:
+    - technitium_dns_keepalived_health_check_enabled | bool
+    - technitium_dns_dns_client_packages | length > 0
+
+- name: Allow binding to non-local addresses
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "1"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - net.ipv4.ip_nonlocal_bind
+    - net.ipv6.ip_nonlocal_bind
+  when: technitium_dns_keepalived_nonlocal_bind | bool
+
+- name: Create the keepalived script directory
+  ansible.builtin.file:
+    path: "{{ technitium_dns_keepalived_script_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# keepalived drops privileges for tracking scripts. Running them as root is a
+# known privilege escalation path, so give them their own unprivileged account.
+- name: Create the tracking script user
+  ansible.builtin.user:
+    name: "{{ technitium_dns_keepalived_script_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    state: present
+  when: technitium_dns_keepalived_health_check_enabled | bool
+
+- name: Install the health check API token
+  ansible.builtin.copy:
+    content: "{{ technitium_dns_keepalived_health_check_api_token }}"
+    dest: "{{ technitium_dns_keepalived_script_dir }}/healthcheck.token"
+    owner: "{{ technitium_dns_keepalived_script_user }}"
+    group: root
+    mode: "0400"
+  no_log: true
+  when:
+    - technitium_dns_keepalived_health_check_enabled | bool
+    - technitium_dns_keepalived_health_check_api_token | length > 0
+
+- name: Install the DNS health check script
+  ansible.builtin.template:
+    src: check_technitium_dns.sh.j2
+    dest: "{{ technitium_dns_keepalived_script_dir }}/check_technitium_dns.sh"
+    owner: root
+    group: root
+    mode: "0755"
+  when: technitium_dns_keepalived_health_check_enabled | bool
+  notify: Reload keepalived
+
+- name: Install the VRRP transition notify script
+  ansible.builtin.template:
+    src: notify_vrrp.sh.j2
+    dest: "{{ technitium_dns_keepalived_script_dir }}/notify_vrrp.sh"
+    owner: root
+    group: root
+    mode: "0755"
+  when: technitium_dns_keepalived_notify_enabled | bool
+  notify: Reload keepalived
+
+# validate= runs keepalived's own config parser before the file is put in place,
+# so a broken template can never take the VIP down.
+- name: Write the keepalived configuration
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: "{{ technitium_dns_keepalived_config_path }}"
+    owner: root
+    group: root
+    mode: "0640"
+    validate: "keepalived -t -f %s"
+    backup: true
+  notify: Reload keepalived
+
+- name: Ensure keepalived is running
+  ansible.builtin.systemd_service:
+    name: "{{ technitium_dns_keepalived_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true

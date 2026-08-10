@@ -1,0 +1,31 @@
+---
+- name: Refresh the package cache
+  ansible.builtin.import_tasks: package_cache.yml
+
+- name: Install prerequisite packages
+  ansible.builtin.package:
+    name: "{{ technitium_dns_prerequisite_packages }}"
+    state: present
+  register: technitium_dns_prereq
+  until: technitium_dns_prereq is succeeded
+  retries: 3
+  delay: 5
+
+- name: Check whether Technitium DNS Server is already installed
+  ansible.builtin.stat:
+    path: "{{ technitium_dns_install_dir }}/DnsServerApp.dll"
+  register: technitium_dns_app_dll
+
+- name: Record whether the server is installed
+  ansible.builtin.set_fact:
+    technitium_dns_already_installed: "{{ technitium_dns_app_dll.stat.exists }}"
+
+- name: Install using the official installer script
+  ansible.builtin.include_tasks: install_script.yml
+  when:
+    - technitium_dns_install_method == 'script'
+    - not technitium_dns_already_installed or technitium_dns_force_reinstall | bool
+
+- name: Install from the portable tarball
+  ansible.builtin.include_tasks: install_tarball.yml
+  when: technitium_dns_install_method == 'tarball'

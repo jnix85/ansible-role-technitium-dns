@@ -1,0 +1,111 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Upstream releases often; a weekly run catches API drift before users do.
+    - cron: "0 5 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install tooling
+        run: pip install ansible-core ansible-lint yamllint
+
+      - name: Install collections
+        run: ansible-galaxy collection install ansible.posix community.general
+
+      - name: yamllint
+        run: yamllint .
+
+      - name: ansible-lint
+        run: ansible-lint
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install tooling
+        run: pip install ansible-core pytest
+
+      - name: Run unit tests
+        run: python -m pytest tests/unit -q
+
+  molecule:
+    name: Molecule (${{ matrix.distro }})
+    runs-on: ubuntu-latest
+    needs: [lint, unit]
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [debian12, ubuntu2404, rockylinux9]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Molecule wants the role directory to be named after the role.
+          path: ansible-role-technitium-dns
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install tooling
+        run: pip install ansible-core molecule molecule-plugins[docker] docker
+
+      - name: Run the default scenario
+        working-directory: ansible-role-technitium-dns
+        env:
+          MOLECULE_DISTRO: ${{ matrix.distro }}
+          ANSIBLE_FORCE_COLOR: "1"
+        run: molecule test -s default
+
+  molecule-cluster:
+    name: Molecule (cluster + VRRP)
+    runs-on: ubuntu-latest
+    needs: [lint, unit]
+    # Three privileged containers and a real failover: slow, so it does not run
+    # on every push.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ansible-role-technitium-dns
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install tooling
+        run: pip install ansible-core molecule molecule-plugins[docker] docker
+
+      - name: Run the cluster scenario
+        working-directory: ansible-role-technitium-dns
+        env:
+          ANSIBLE_FORCE_COLOR: "1"
+        run: molecule test -s cluster

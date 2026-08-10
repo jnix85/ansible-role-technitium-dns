@@ -1,0 +1,28 @@
+---
+profile: production
+
+exclude_paths:
+  - .github/
+  - molecule/
+  - examples/
+
+# Role-local library/ and module_utils/ are only resolvable at play time, so the
+# schema checker cannot see these modules.
+mock_modules:
+  - technitium_dns_app
+  - technitium_dns_blocklist
+  - technitium_dns_bootstrap
+  - technitium_dns_cluster
+  - technitium_dns_dhcp_scope
+  - technitium_dns_dnssec
+  - technitium_dns_group
+  - technitium_dns_info
+  - technitium_dns_permission
+  - technitium_dns_record
+  - technitium_dns_settings
+  - technitium_dns_user
+  - technitium_dns_zone
+
+skip_list:
+  # The role name is fixed by the repository name.
+  - role-name

@@ -1,0 +1,22 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Restart Technitium DNS Server
+  ansible.builtin.systemd_service:
+    name: "{{ technitium_dns_service_name }}"
+    state: restarted
+  when: technitium_dns_service_state != 'stopped'
+
+- name: Restart systemd-resolved
+  ansible.builtin.systemd_service:
+    name: systemd-resolved
+    state: restarted
+
+# Reload rather than restart: a restart re-runs the VRRP election and can move
+# the VIP for no reason. keepalived reloads its configuration in place.
+- name: Reload keepalived
+  ansible.builtin.systemd_service:
+    name: "{{ technitium_dns_keepalived_service }}"
+    state: reloaded

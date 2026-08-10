@@ -1,0 +1,18 @@
+---
+technitium_dns_prerequisite_packages:
+  - curl
+  - ca-certificates
+  - tar
+
+# Package names for the self-managed tarball install. Debian and Ubuntu ship
+# the ASP.NET runtime in the distribution archive.
+technitium_dns_dotnet_packages:
+  - aspnetcore-runtime-8.0
+
+technitium_dns_dotnet_binary: /usr/bin/dotnet
+
+# Not "dnsutils": that was a transitional package, dropped in Ubuntu 24.04.
+technitium_dns_dns_client_packages:
+  - bind9-dnsutils
+
+technitium_dns_firewall_default_backend: ufw

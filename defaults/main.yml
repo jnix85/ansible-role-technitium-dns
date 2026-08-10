@@ -1,0 +1,250 @@
+---
+# ============================================================================
+# Installation
+# ============================================================================
+
+# script  - run the official installer from download.technitium.com. It pulls in
+#           the .NET runtime and installs the systemd unit for you.
+# tarball - this role downloads DnsServerPortable.tar.gz, installs the .NET
+#           runtime from distribution packages, creates the service user and
+#           templates its own unit. Pin a version and work offline with this.
+technitium_dns_install_method: script
+
+# Version to install. "latest" only means anything for the script method; the
+# tarball method needs a concrete version to be reproducible.
+technitium_dns_version: latest
+
+technitium_dns_installer_url: https://download.technitium.com/dns/install.sh
+technitium_dns_tarball_url: https://download.technitium.com/dns/DnsServerPortable.tar.gz
+# Set to a local path or an internal mirror for air-gapped installs.
+technitium_dns_tarball_local_path: ""
+
+technitium_dns_install_dir: /opt/technitium/dns
+technitium_dns_config_dir: /etc/dns
+technitium_dns_log_dir: /var/log/technitium/dns
+technitium_dns_user: dns-server
+technitium_dns_group: dns-server
+technitium_dns_service_name: dns
+technitium_dns_service_enabled: true
+technitium_dns_service_state: started
+
+# Disable a conflicting stub resolver on the DNS port before starting.
+technitium_dns_disable_systemd_resolved_stub: true
+
+# ============================================================================
+# API access
+# ============================================================================
+
+technitium_dns_api_scheme: http
+technitium_dns_api_host: 127.0.0.1
+technitium_dns_api_port: 5380
+technitium_dns_api_url: "{{ technitium_dns_api_scheme }}://{{ technitium_dns_api_host }}:{{ technitium_dns_api_port }}"
+technitium_dns_api_validate_certs: true
+technitium_dns_api_timeout: 30
+
+technitium_dns_admin_username: admin
+# REQUIRED. Put this in a vault; the role refuses to run with the default.
+technitium_dns_admin_password: ""
+technitium_dns_default_admin_password: admin
+
+# Supply a pre-existing API token to skip the login/bootstrap step entirely.
+technitium_dns_api_token: ""
+# Create a named, non-expiring API token instead of a throwaway session token.
+technitium_dns_create_api_token: false
+technitium_dns_api_token_name: ansible
+
+# ============================================================================
+# Server settings
+# ============================================================================
+
+# Node-local settings. Always applied on every host, because clustering does not
+# replicate them: endpoints, certificates, logging and the node's own identity.
+# The default sets dnsServerDomain, which clustering requires to be a child of
+# the cluster domain.
+technitium_dns_node_settings:
+  dnsServerDomain: "{{ technitium_dns_node_domain }}"
+  dnsServerLocalEndPoints:
+    - 0.0.0.0:53
+    - "[::]:53"
+  webServiceLocalAddresses:
+    - 0.0.0.0
+    - "[::]"
+  webServiceHttpPort: "{{ technitium_dns_api_port }}"
+  webServiceEnableTls: "{{ technitium_dns_cluster_enabled }}"
+  webServiceTlsPort: "{{ technitium_dns_https_port }}"
+  webServiceUseSelfSignedTlsCertificate: "{{ technitium_dns_cluster_enabled }}"
+
+technitium_dns_https_port: 53443
+
+# The node's own fully qualified name. Under clustering this MUST be a child of
+# technitium_dns_cluster_domain, e.g. ns1.example.com in cluster example.com.
+technitium_dns_node_domain: "{{ inventory_hostname }}"
+
+# Cluster-wide settings. When clustering is on these are applied on the primary
+# node only and replicated from there; otherwise they are applied everywhere.
+# Any parameter from the /api/settings/set API is valid here.
+technitium_dns_settings:
+  recursion: AllowOnlyForPrivateNetworks
+  dnssecValidation: true
+  enableBlocking: false
+
+# Send password settings that the API never reads back. Always reports changed.
+technitium_dns_settings_update_write_only: false
+
+# ============================================================================
+# Clustering
+# ============================================================================
+
+# Clustering replicates Allowed, Blocked, Apps, Settings and Administration from
+# the primary to every secondary, and provides a catalog zone for provisioning
+# zones cluster-wide. It does NOT move an IP address - that is keepalived's job.
+technitium_dns_cluster_enabled: false
+technitium_dns_cluster_state: present
+
+# The cluster's identifying FQDN. Cannot be changed after initialization.
+technitium_dns_cluster_domain: ""
+
+# inventory_hostname of the primary node. Every other host in the play joins it.
+technitium_dns_cluster_primary: ""
+
+# This node's role, derived from the above. Override only for unusual topologies.
+technitium_dns_cluster_role: >-
+  {{ 'primary' if inventory_hostname == technitium_dns_cluster_primary else 'secondary' }}
+
+# Addresses the other nodes reach this node on.
+technitium_dns_cluster_node_ip_addresses:
+  - "{{ ansible_default_ipv4.address | default(ansible_host) }}"
+
+# Accept the primary's self-signed web certificate when joining. Required when
+# using webServiceUseSelfSignedTlsCertificate, which is the default.
+technitium_dns_cluster_ignore_certificate_errors: true
+
+technitium_dns_cluster_options:
+  heartbeat_refresh_interval_seconds: 30
+  heartbeat_retry_interval_seconds: 10
+  config_refresh_interval_seconds: 900
+  config_retry_interval_seconds: 60
+
+# Name of the catalog zone created by cluster initialization. Zones made members
+# of it are provisioned automatically on every secondary node.
+technitium_dns_cluster_catalog_zone: >-
+  {{ ('cluster-catalog.' + technitium_dns_cluster_domain)
+     if technitium_dns_cluster_domain else '' }}
+
+# ============================================================================
+# Zones, records and the rest of the configuration
+# ============================================================================
+
+# Each entry takes the options of the technitium_dns_zone module.
+# Add "records:" to a zone to manage its records inline.
+technitium_dns_zones: []
+# Example:
+#   - zone: internal.example.com
+#     type: Primary
+#     catalog: "{{ technitium_dns_cluster_catalog_zone }}"
+#     records:
+#       - domain: ns1.internal.example.com
+#         type: A
+#         data: {ipAddress: 192.168.10.5}
+#         update_ptr: true
+
+# Records for zones managed elsewhere. Options of the technitium_dns_record module.
+technitium_dns_records: []
+
+# Options of the technitium_dns_dhcp_scope module. Not replicated by clustering.
+technitium_dns_dhcp_scopes: []
+
+technitium_dns_users: []
+technitium_dns_groups: []
+technitium_dns_permissions: []
+
+technitium_dns_apps: []
+
+# Manually maintained allow/block entries. Automatic block list URLs belong in
+# technitium_dns_settings as blockListUrls.
+technitium_dns_allowed_domains: []
+technitium_dns_blocked_domains: []
+technitium_dns_blocklist_exclusive: false
+
+# Options of the technitium_dns_dnssec module.
+technitium_dns_dnssec_zones: []
+
+# ============================================================================
+# keepalived / VRRP
+# ============================================================================
+
+technitium_dns_keepalived_enabled: false
+technitium_dns_keepalived_package: keepalived
+technitium_dns_keepalived_service: keepalived
+technitium_dns_keepalived_config_path: /etc/keepalived/keepalived.conf
+technitium_dns_keepalived_script_dir: /etc/keepalived/scripts
+technitium_dns_keepalived_script_user: keepalived_script
+
+# global_defs
+technitium_dns_keepalived_router_id: "{{ ansible_hostname }}"
+technitium_dns_keepalived_global_defs: []
+
+# Health check. The default proves the server actually resolves, not merely that
+# the process is alive, so a wedged resolver hands the VIP over.
+technitium_dns_keepalived_health_check_enabled: true
+technitium_dns_keepalived_health_check_name: chk_technitium_dns
+technitium_dns_keepalived_health_check_domain: localhost
+technitium_dns_keepalived_health_check_type: A
+technitium_dns_keepalived_health_check_interval: 2
+technitium_dns_keepalived_health_check_timeout: 2
+technitium_dns_keepalived_health_check_fall: 3
+technitium_dns_keepalived_health_check_rise: 2
+# Subtracted from priority on failure instead of forcing FAULT state. Leave
+# unset for the simpler "failed check means give up the VIP" behaviour.
+technitium_dns_keepalived_health_check_weight: 0
+
+# Log VRRP transitions to syslog, and optionally run your own command.
+technitium_dns_keepalived_notify_enabled: true
+technitium_dns_keepalived_notify_command: ""
+
+# VRRP instances. Give each one a virtual_router_id unique on its L2 segment,
+# and a different priority on each node.
+technitium_dns_keepalived_instances: []
+# Example:
+#   - name: DNS_VIP
+#     interface: "{{ ansible_default_ipv4.interface }}"
+#     virtual_router_id: 51
+#     priority: "{{ 150 if inventory_hostname == groups['dns'][0] else 100 }}"
+#     virtual_ipaddresses:
+#       - address: 192.168.10.4
+#         prefix: 24
+#     authentication:
+#       auth_type: PASS
+#       auth_pass: "{{ vault_vrrp_password }}"
+
+# Defaults merged into each instance that does not set them.
+technitium_dns_keepalived_instance_defaults:
+  state: BACKUP
+  advert_int: 1
+  preempt: true
+  preempt_delay: 0
+  # Unicast avoids needing multicast on the segment, and is the only thing that
+  # works on most cloud networks.
+  unicast: true
+  garp_master_delay: 5
+  garp_master_refresh: 0
+
+# Allow processes to bind addresses that are not (yet) local. Only needed when a
+# service binds the VIP explicitly rather than 0.0.0.0.
+technitium_dns_keepalived_nonlocal_bind: false
+
+# ============================================================================
+# Firewall
+# ============================================================================
+
+technitium_dns_manage_firewall: false
+# auto detects firewalld or ufw; or force one with "firewalld" / "ufw".
+technitium_dns_firewall_backend: auto
+technitium_dns_firewall_zone: public
+technitium_dns_firewall_allow_dns: true
+technitium_dns_firewall_allow_web_console: true
+technitium_dns_firewall_allow_dhcp: false
+technitium_dns_firewall_allow_doh: false
+technitium_dns_firewall_allow_dot: false
+# Extra "port/proto" entries.
+technitium_dns_firewall_extra_ports: []

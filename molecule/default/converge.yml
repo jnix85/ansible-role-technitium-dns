@@ -1,0 +1,83 @@
+---
+- name: Converge a single Technitium DNS node
+  hosts: all
+
+  vars:
+    technitium_dns_admin_password: molecule-test-password
+    technitium_dns_node_domain: ns1.molecule.test
+
+    technitium_dns_settings:
+      recursion: AllowOnlyForPrivateNetworks
+      dnssecValidation: true
+      forwarders:
+        - 9.9.9.9
+      forwarderProtocol: Tcp
+      enableBlocking: true
+
+    technitium_dns_zones:
+      - zone: molecule.test
+        type: Primary
+        records:
+          - domain: ns1.molecule.test
+            type: A
+            ttl: 300
+            data:
+              ipAddress: 10.10.10.5
+            update_ptr: true
+          - domain: www.molecule.test
+            type: CNAME
+            exclusive: true
+            data:
+              cname: ns1.molecule.test
+          - domain: molecule.test
+            type: MX
+            exclusive: true
+            data:
+              exchange: mail.molecule.test
+              preference: 10
+
+      - zone: 10.10.10.0/24
+        type: Primary
+
+    technitium_dns_records:
+      - domain: spf.molecule.test
+        zone: molecule.test
+        type: TXT
+        data:
+          text: "v=spf1 -all"
+
+    technitium_dns_groups:
+      - name: Zone Operators
+        description: Managed by molecule
+
+    technitium_dns_users:
+      - username: operator
+        display_name: Molecule Operator
+        password: molecule-operator-password
+        groups:
+          - Zone Operators
+
+    technitium_dns_blocked_domains:
+      - ads.molecule.test
+
+    technitium_dns_dhcp_scopes:
+      - name: molecule-lan
+        starting_address: 10.10.10.100
+        ending_address: 10.10.10.200
+        subnet_mask: 255.255.255.0
+        router_address: 10.10.10.1
+        domain_name: molecule.test
+        lease_time_days: 1
+        exclusions:
+          - starting_address: 10.10.10.100
+            ending_address: 10.10.10.109
+        reserved_leases:
+          - host_name: printer
+            hardware_address: 00-11-22-33-44-55
+            address: 10.10.10.120
+
+  roles:
+    # By path, not by name: molecule's roles path does not include the repo's
+    # parent, and the prerun symlink is named from meta (jnix85.technitium_dns),
+    # not after the checkout directory. A path depends on neither.
+    - role: "{{ playbook_dir }}/../.."

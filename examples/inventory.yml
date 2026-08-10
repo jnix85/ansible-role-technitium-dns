@@ -1,0 +1,97 @@
+---
+# A three node Technitium cluster behind one floating service address.
+#
+#   cluster domain : example.com          (config replication)
+#   service VIP    : 192.168.10.4         (VRRP, moves between nodes)
+#   nodes          : 192.168.10.5/.6/.7
+#
+# Clients are pointed at the VIP. Whichever node holds it answers, and all three
+# hold identical configuration because of clustering.
+
+all:
+  children:
+    technitium_dns:
+      hosts:
+        ns1:
+          ansible_host: 192.168.10.5
+          technitium_dns_node_domain: ns1.example.com
+          # Highest priority, so this node holds the VIP when healthy.
+          technitium_dns_vrrp_priority: 150
+        ns2:
+          ansible_host: 192.168.10.6
+          technitium_dns_node_domain: ns2.example.com
+          technitium_dns_vrrp_priority: 140
+        ns3:
+          ansible_host: 192.168.10.7
+          technitium_dns_node_domain: ns3.example.com
+          technitium_dns_vrrp_priority: 130
+
+      vars:
+        # ------------------------------------------------------------ access
+        # Real deployments keep these in ansible-vault.
+        technitium_dns_admin_password: "{{ vault_technitium_admin_password }}"
+
+        # ---------------------------------------------------------- clustering
+        technitium_dns_cluster_enabled: true
+        technitium_dns_cluster_domain: example.com
+        technitium_dns_cluster_primary: ns1
+
+        # ------------------------------------------------------------ settings
+        # Replicated to every node from the primary.
+        technitium_dns_settings:
+          recursion: AllowOnlyForPrivateNetworks
+          dnssecValidation: true
+          forwarders:
+            - 9.9.9.9
+            - 149.112.112.112
+          forwarderProtocol: Tls
+          enableBlocking: true
+          blockListUrls:
+            - https://big.oisd.nl/
+
+        # -------------------------------------------------------------- zones
+        # Catalog membership provisions these on every secondary automatically.
+        technitium_dns_zones:
+          - zone: internal.example.com
+            type: Primary
+            catalog: "{{ technitium_dns_cluster_catalog_zone }}"
+            records:
+              - domain: ns1.internal.example.com
+                type: A
+                data: {ipAddress: 192.168.10.5}
+                update_ptr: true
+                create_ptr_zone: true
+              - domain: ns2.internal.example.com
+                type: A
+                data: {ipAddress: 192.168.10.6}
+                update_ptr: true
+              - domain: ns3.internal.example.com
+                type: A
+                data: {ipAddress: 192.168.10.7}
+                update_ptr: true
+              # The service address clients actually use.
+              - domain: dns.internal.example.com
+                type: A
+                exclusive: true
+                data: {ipAddress: 192.168.10.4}
+
+          - zone: 192.168.10.0/24
+            type: Primary
+            catalog: "{{ technitium_dns_cluster_catalog_zone }}"
+
+        # --------------------------------------------------------- keepalived
+        technitium_dns_keepalived_enabled: true
+        technitium_dns_keepalived_instances:
+          - name: DNS_VIP
+            interface: "{{ ansible_default_ipv4.interface }}"
+            virtual_router_id: 51
+            priority: "{{ technitium_dns_vrrp_priority }}"
+            virtual_ipaddresses:
+              - address: 192.168.10.4
+                prefix: 24
+            authentication:
+              auth_type: PASS
+              auth_pass: "{{ vault_vrrp_password }}"
+
+        # ----------------------------------------------------------- firewall
+        technitium_dns_manage_firewall: true

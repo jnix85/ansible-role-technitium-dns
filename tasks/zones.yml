@@ -1,0 +1,102 @@
+---
+# Zones are part of the cluster catalog mechanism rather than the replicated
+# config sections, but they are still authored in one place: the primary node
+# creates them and secondaries pick up catalog members automatically.
+
+- name: Manage zones
+  technitium_dns_zone:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    zone: "{{ item.zone }}"
+    state: "{{ item.state | default('present') }}"
+    type: "{{ item.type | default('Primary') }}"
+    convert: "{{ item.convert | default(false) }}"
+    enabled: "{{ item.enabled | default(true) }}"
+    catalog: "{{ item.catalog | default(omit) }}"
+    primary_name_server_addresses: "{{ item.primary_name_server_addresses | default(omit) }}"
+    zone_transfer_protocol: "{{ item.zone_transfer_protocol | default(omit) }}"
+    tsig_key_name: "{{ item.tsig_key_name | default(omit) }}"
+    use_soa_serial_date_scheme: "{{ item.use_soa_serial_date_scheme | default(omit) }}"
+    validate_zone: "{{ item.validate_zone | default(omit) }}"
+    forwarder: "{{ item.forwarder | default(omit) }}"
+    forwarder_protocol: "{{ item.forwarder_protocol | default(omit) }}"
+    initialize_forwarder: "{{ item.initialize_forwarder | default(omit) }}"
+    dnssec_validation: "{{ item.dnssec_validation | default(omit) }}"
+    options: "{{ item.options | default(omit) }}"
+  loop: "{{ technitium_dns_zones }}"
+  loop_control:
+    label: "{{ item.zone }}"
+  when: technitium_dns_manages_cluster_wide_config | bool
+
+- name: Manage records declared inside zones
+  technitium_dns_record:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    zone: "{{ item.0.zone }}"
+    domain: "{{ item.1.domain }}"
+    type: "{{ item.1.type }}"
+    state: "{{ item.1.state | default('present') }}"
+    data: "{{ item.1.data | default(omit) }}"
+    ttl: "{{ item.1.ttl | default(omit) }}"
+    exclusive: "{{ item.1.exclusive | default(false) }}"
+    disabled: "{{ item.1.disabled | default(omit) }}"
+    comments: "{{ item.1.comments | default(omit) }}"
+    expiry_ttl: "{{ item.1.expiry_ttl | default(omit) }}"
+    update_ptr: "{{ item.1.update_ptr | default(omit) }}"
+    create_ptr_zone: "{{ item.1.create_ptr_zone | default(omit) }}"
+  loop: "{{ technitium_dns_zones | selectattr('records', 'defined')
+            | subelements('records') }}"
+  loop_control:
+    label: "{{ item.1.domain }} {{ item.1.type }}"
+  when:
+    - technitium_dns_manages_cluster_wide_config | bool
+    - item.0.state | default('present') == 'present'
+
+- name: Manage standalone records
+  technitium_dns_record:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    zone: "{{ item.zone | default(omit) }}"
+    domain: "{{ item.domain }}"
+    type: "{{ item.type }}"
+    state: "{{ item.state | default('present') }}"
+    data: "{{ item.data | default(omit) }}"
+    ttl: "{{ item.ttl | default(omit) }}"
+    exclusive: "{{ item.exclusive | default(false) }}"
+    disabled: "{{ item.disabled | default(omit) }}"
+    comments: "{{ item.comments | default(omit) }}"
+    expiry_ttl: "{{ item.expiry_ttl | default(omit) }}"
+    update_ptr: "{{ item.update_ptr | default(omit) }}"
+    create_ptr_zone: "{{ item.create_ptr_zone | default(omit) }}"
+  loop: "{{ technitium_dns_records }}"
+  loop_control:
+    label: "{{ item.domain }} {{ item.type }}"
+  when: technitium_dns_manages_cluster_wide_config | bool
+
+- name: Manage DNSSEC signing
+  technitium_dns_dnssec:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    zone: "{{ item.zone }}"
+    state: "{{ item.state | default('signed') }}"
+    algorithm: "{{ item.algorithm | default('ECDSA') }}"
+    curve: "{{ item.curve | default('P256') }}"
+    hash_algorithm: "{{ item.hash_algorithm | default(omit) }}"
+    key_size: "{{ item.key_size | default(omit) }}"
+    nx_proof: "{{ item.nx_proof | default('NSEC3') }}"
+    iterations: "{{ item.iterations | default(omit) }}"
+    salt_length: "{{ item.salt_length | default(omit) }}"
+    dnskey_ttl: "{{ item.dnskey_ttl | default(omit) }}"
+    zsk_rollover_days: "{{ item.zsk_rollover_days | default(omit) }}"
+  loop: "{{ technitium_dns_dnssec_zones }}"
+  loop_control:
+    label: "{{ item.zone }}"
+  when: technitium_dns_manages_cluster_wide_config | bool

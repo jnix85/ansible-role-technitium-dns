@@ -1,0 +1,84 @@
+---
+- name: Verify the node is configured as declared
+  hosts: all
+  gather_facts: false
+
+  vars:
+    technitium_dns_admin_password: molecule-test-password
+
+  tasks:
+    - name: The service is running and enabled
+      ansible.builtin.systemd_service:
+        name: dns
+      register: dns_service
+      failed_when:
+        - dns_service.status.ActiveState != 'active'
+
+    - name: Gather everything from the API
+      technitium_dns_info:
+        api_url: http://127.0.0.1:5380
+        api_username: admin
+        api_password: "{{ technitium_dns_admin_password }}"
+        gather: [status, settings, zones, dhcp, users, groups]
+      register: technitium
+
+    - name: The default credentials are gone
+      ansible.builtin.assert:
+        that:
+          - not technitium.status.hasDefaultCredentials
+        fail_msg: The server still accepts the default admin password.
+
+    - name: Settings match what was declared
+      ansible.builtin.assert:
+        that:
+          - technitium.settings.dnsServerDomain == 'ns1.molecule.test'
+          - technitium.settings.dnssecValidation
+          - technitium.settings.forwarders == ['9.9.9.9']
+          - technitium.settings.recursion == 'AllowOnlyForPrivateNetworks'
+        fail_msg: "Settings drifted: {{ technitium.settings | to_nice_json }}"
+
+    - name: Both zones exist
+      ansible.builtin.assert:
+        that:
+          - "'molecule.test' in zone_names"
+          - "'10.10.10.in-addr.arpa' in zone_names"
+        fail_msg: "Zones present: {{ zone_names }}"
+      vars:
+        zone_names: "{{ technitium.zones | map(attribute='name') | list }}"
+
+    - name: The DHCP scope exists
+      ansible.builtin.assert:
+        that:
+          - "'molecule-lan' in technitium.dhcp | map(attribute='name') | list"
+
+    - name: The user and group exist
+      ansible.builtin.assert:
+        that:
+          - "'operator' in technitium.users | map(attribute='username') | list"
+          - "'Zone Operators' in technitium.groups | map(attribute='name') | list"
+
+    - name: Records resolve over DNS, not just over the API
+      ansible.builtin.command:
+        argv:
+          - dig
+          - +short
+          - "@127.0.0.1"
+          - "{{ item.name }}"
+          - "{{ item.type }}"
+      register: dig_result
+      changed_when: false
+      failed_when: item.expect not in dig_result.stdout
+      loop:
+        - {name: ns1.molecule.test, type: A, expect: "10.10.10.5"}
+        - {name: www.molecule.test, type: CNAME, expect: "ns1.molecule.test"}
+        - {name: molecule.test, type: MX, expect: "mail.molecule.test"}
+        - {name: spf.molecule.test, type: TXT, expect: "v=spf1 -all"}
+      loop_control:
+        label: "{{ item.name }} {{ item.type }}"
+
+    - name: The reverse record was created by update_ptr
+      ansible.builtin.command:
+        argv: [dig, +short, "@127.0.0.1", -x, "10.10.10.5"]
+      register: reverse_lookup
+      changed_when: false
+      failed_when: "'ns1.molecule.test' not in reverse_lookup.stdout"

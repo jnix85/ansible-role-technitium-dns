@@ -1,0 +1,54 @@
+---
+- name: Converge a three node cluster with a floating VIP
+  hosts: technitium_dns
+  strategy: linear
+
+  vars:
+    technitium_dns_admin_password: molecule-test-password
+    technitium_dns_node_domain: "{{ inventory_hostname | replace('technitium-', '') }}.molecule.test"
+
+    technitium_dns_cluster_enabled: true
+    technitium_dns_cluster_domain: molecule.test
+    technitium_dns_cluster_primary: technitium-ns1
+
+    technitium_dns_settings:
+      recursion: AllowOnlyForPrivateNetworks
+      dnssecValidation: true
+      forwarders:
+        - 9.9.9.9
+      forwarderProtocol: Tcp
+
+    technitium_dns_zones:
+      - zone: lab.molecule.test
+        type: Primary
+        catalog: "{{ technitium_dns_cluster_catalog_zone }}"
+        records:
+          - domain: www.lab.molecule.test
+            type: A
+            exclusive: true
+            data:
+              ipAddress: "{{ technitium_dns_cluster_vip }}"
+
+    # A high address on the container network, which docker allocates from the
+    # bottom upwards. verify.yml derives the same address the same way, so the
+    # two playbooks agree without sharing facts.
+    technitium_dns_cluster_vip: "{{ ansible_default_ipv4.address.split('.')[:3] | join('.') }}.250"
+
+    technitium_dns_keepalived_enabled: true
+    technitium_dns_keepalived_instances:
+      - name: DNS_VIP
+        interface: "{{ ansible_default_ipv4.interface }}"
+        virtual_router_id: 51
+        priority: "{{ 150 - (groups['technitium_dns'].index(inventory_hostname) * 10) }}"
+        virtual_ipaddresses:
+          - address: "{{ technitium_dns_cluster_vip }}"
+            prefix: "{{ ansible_default_ipv4.prefix | default(24) }}"
+        authentication:
+          auth_type: PASS
+          auth_pass: molecule
+
+  roles:
+    # By path, not by name: molecule's roles path does not include the repo's
+    # parent, and the prerun symlink is named from meta (jnix85.technitium_dns),
+    # not after the checkout directory. A path depends on neither.
+    - role: "{{ playbook_dir }}/../.."

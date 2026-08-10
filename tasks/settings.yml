@@ -1,0 +1,28 @@
+---
+# Settings are split in two because clustering replicates some of them and not
+# others. The API documentation marks the replicated ones as "cluster parameter";
+# those belong in technitium_dns_settings and are owned by the primary node.
+# Endpoints, certificates and the node's own identity are node-local and are
+# applied on every host, always.
+
+- name: Apply node-local settings
+  technitium_dns_settings:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    settings: "{{ technitium_dns_node_settings }}"
+    update_write_only: "{{ technitium_dns_settings_update_write_only }}"
+  when: technitium_dns_node_settings | length > 0
+
+- name: Apply cluster-wide settings
+  technitium_dns_settings:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    settings: "{{ technitium_dns_settings }}"
+    update_write_only: "{{ technitium_dns_settings_update_write_only }}"
+  when:
+    - technitium_dns_settings | length > 0
+    - technitium_dns_manages_cluster_wide_config | bool

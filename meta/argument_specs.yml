@@ -1,0 +1,133 @@
+---
+argument_specs:
+  main:
+    short_description: Install and configure Technitium DNS Server, clustering and keepalived
+    description:
+      - Installs Technitium DNS Server, applies its configuration declaratively
+        over the HTTP API, optionally initializes or joins a Technitium cluster,
+        and optionally configures keepalived for a floating service address.
+    options:
+      technitium_dns_install_method:
+        description:
+          - C(script) runs the official installer.
+          - C(tarball) installs a pinned portable release under this role's control.
+        type: str
+        choices: [script, tarball]
+        default: script
+
+      technitium_dns_admin_password:
+        description:
+          - Password for the administrator account. Required unless
+            I(technitium_dns_api_token) is supplied. Keep it in a vault.
+        type: str
+        default: ""
+
+      technitium_dns_api_token:
+        description: Pre-existing API token, used instead of logging in.
+        type: str
+        default: ""
+
+      technitium_dns_api_url:
+        description: Base URL of the server's web service.
+        type: str
+
+      technitium_dns_node_domain:
+        description:
+          - This node's fully qualified name. Under clustering it must be a child
+            of I(technitium_dns_cluster_domain).
+        type: str
+
+      technitium_dns_node_settings:
+        description:
+          - Node-local server settings, applied on every host. These are the
+            settings clustering does not replicate.
+        type: dict
+
+      technitium_dns_settings:
+        description:
+          - Cluster-wide server settings. Applied on the primary node only when
+            clustering is enabled, since the primary's copy is authoritative.
+        type: dict
+
+      technitium_dns_cluster_enabled:
+        description: Initialize or join a Technitium cluster.
+        type: bool
+        default: false
+
+      technitium_dns_cluster_domain:
+        description:
+          - The cluster's identifying FQDN. Cannot be changed after initialization.
+        type: str
+        default: ""
+
+      technitium_dns_cluster_primary:
+        description: C(inventory_hostname) of the node that is the cluster primary.
+        type: str
+        default: ""
+
+      technitium_dns_cluster_node_ip_addresses:
+        description: Addresses the other cluster nodes can reach this node on.
+        type: list
+        elements: str
+
+      technitium_dns_zones:
+        description:
+          - Zones to manage. Each entry takes the options of the
+            M(technitium_dns_zone) module, plus an optional C(records) list of
+            M(technitium_dns_record) options.
+        type: list
+        elements: dict
+
+      technitium_dns_records:
+        description: Records for zones managed elsewhere.
+        type: list
+        elements: dict
+
+      technitium_dns_dhcp_scopes:
+        description:
+          - DHCP scopes, applied per node because clustering does not replicate them.
+        type: list
+        elements: dict
+
+      technitium_dns_users:
+        description: Local user accounts.
+        type: list
+        elements: dict
+
+      technitium_dns_groups:
+        description: User groups.
+        type: list
+        elements: dict
+
+      technitium_dns_permissions:
+        description: Section and per-zone permission tables.
+        type: list
+        elements: dict
+
+      technitium_dns_apps:
+        description: DNS apps to install and configure.
+        type: list
+        elements: dict
+
+      technitium_dns_dnssec_zones:
+        description: Zones to sign with DNSSEC.
+        type: list
+        elements: dict
+
+      technitium_dns_keepalived_enabled:
+        description: Configure keepalived for a floating service address.
+        type: bool
+        default: false
+
+      technitium_dns_keepalived_instances:
+        description:
+          - VRRP instances. Each needs C(name), C(interface),
+            C(virtual_router_id) and C(virtual_ipaddresses); C(priority) should
+            differ per node.
+        type: list
+        elements: dict
+
+      technitium_dns_manage_firewall:
+        description: Open the DNS, web console and VRRP ports.
+        type: bool
+        default: false

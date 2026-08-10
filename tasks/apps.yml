@@ -1,0 +1,18 @@
+---
+# The Apps section is replicated by clustering, so apps are installed and
+# configured on the primary node only.
+
+- name: Manage DNS apps
+  technitium_dns_app:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    url: "{{ item.url | default(omit) }}"
+    config: "{{ item.config | default(omit) }}"
+  loop: "{{ technitium_dns_apps }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: technitium_dns_manages_cluster_wide_config | bool
