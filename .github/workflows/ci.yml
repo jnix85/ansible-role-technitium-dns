@@ -86,11 +86,13 @@ jobs:
         run: molecule test -s default
 
   molecule-cluster:
-    name: Molecule (cluster + VRRP)
+    name: Molecule (cluster + VRRP, containers)
     runs-on: ubuntu-latest
     needs: [lint, unit]
     # Three privileged containers and a real failover: slow, so it does not run
-    # on every push.
+    # on every push. Fast signal for the cluster/catalog logic; vm-cluster below
+    # is the scenario that means something for VRRP, since containers share a
+    # bridge rather than a real L2 segment.
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v4
@@ -109,3 +111,46 @@ jobs:
         env:
           ANSIBLE_FORCE_COLOR: "1"
         run: molecule test -s cluster
+
+  molecule-vm-cluster:
+    name: Molecule (cluster + VRRP, VMs)
+    runs-on: ubuntu-latest
+    needs: [lint, unit]
+    # Manual only. This needs nested virtualization (KVM) and vagrant-libvirt,
+    # which standard GitHub-hosted runners are not guaranteed to provide -
+    # unlike molecule-cluster above, this is not something to gate merges on.
+    # It is the scenario that actually proves the install path (the official
+    # installer refuses to run without systemd/openrc), the systemd-resolved
+    # stub handling, and VRRP failover on real interfaces.
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ansible-role-technitium-dns
+
+      - name: Check for KVM support
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::/dev/kvm not available on this runner - use a self-hosted runner with nested virtualization for this job."
+            exit 1
+          fi
+
+      - name: Install libvirt and vagrant
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-kvm libvirt-daemon-system vagrant
+          sudo usermod -aG libvirt,kvm "$USER"
+          vagrant plugin install vagrant-libvirt
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install tooling
+        run: pip install ansible-core ansible molecule molecule-plugins[vagrant]
+
+      - name: Run the VM cluster scenario
+        working-directory: ansible-role-technitium-dns
+        env:
+          ANSIBLE_FORCE_COLOR: "1"
+        run: sg libvirt -c "molecule test -s vm-cluster"

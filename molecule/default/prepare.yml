@@ -1,9 +1,31 @@
 ---
 - name: Prepare the test container
   hosts: all
-  gather_facts: true
+  # Facts are gathered explicitly below: gathering runs before any task, and
+  # until systemd is up the nss lookups it needs can fail.
+  gather_facts: false
+  # The container connection is already root (see molecule.yml host_vars):
+  # become/sudo is both unnecessary here and unreliable this early in boot,
+  # since sudo's PAM account-management phase needs dbus/systemd-logind,
+  # which can still be settling for a few seconds after systemd itself
+  # reports "running".
+  become: false
 
   tasks:
+    # systemd is still booting when molecule moves on from create. The
+    # Technitium installer refuses to run at all until it is up, with
+    # "systemd/openrc was not detected". raw needs neither python nor
+    # become, so it works regardless of what else is or isn't ready yet.
+    - name: Wait for systemd to finish booting
+      ansible.builtin.raw: systemctl is-system-running --wait
+      register: systemd_state
+      changed_when: false
+      # degraded is normal in a container; only a total failure to boot matters.
+      failed_when: systemd_state.stdout is not search('running|degraded')
+
+    - name: Gather facts now that the system is up
+      ansible.builtin.setup:
+
     # Read the role's own package names rather than repeating them here, so the
     # test cannot drift from what the role installs on each distribution.
     - name: Load the role's OS specific variables

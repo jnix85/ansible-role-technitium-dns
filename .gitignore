@@ -11,3 +11,7 @@ __pycache__/
 
 # Molecule
 .molecule/
+
+# Vagrant (molecule vm-cluster scenario)
+.vagrant/
+*.box

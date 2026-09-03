@@ -192,15 +192,20 @@ def apply_options(client, zone_name, check_mode):
 def run(client):
     module = client.module
     params = module.params
-    name = params['zone']
+    requested = params['zone']
 
-    existing = find_zone(client, name)
+    existing = find_zone(client, requested)
+    # For a zone created from a bare IP/CIDR, the server assigns the actual
+    # reverse zone name (e.g. "10.10.10.0/24" -> "10.10.10.in-addr.arpa").
+    # Every call below - enable/disable/options/convert/delete - needs that
+    # real name, not the CIDR shorthand only zones/create accepts.
+    effective_name = existing['name'] if existing else requested
 
     if params['state'] == 'absent':
         if not existing:
             return dict(changed=False, zone=None)
         if not module.check_mode:
-            client.call('/api/zones/delete', params=dict(zone=name))
+            client.call('/api/zones/delete', params=dict(zone=effective_name))
         return dict(changed=True, zone=None,
                     diff=dict(before=existing, after=None))
 
@@ -209,19 +214,40 @@ def run(client):
     after = {}
 
     if not existing:
+        # Best-effort in check mode: there is no create response to recover
+        # a CIDR zone's real name from, so a not-yet-created reverse zone is
+        # simply reported as would-be-created.
+        created = module.check_mode
         if not module.check_mode:
-            client.call('/api/zones/create', params=create_params(module))
-        changed = True
-        after['type'] = params['type']
-    elif existing.get('type') != params['type']:
+            try:
+                response = client.call('/api/zones/create', params=create_params(module))
+                effective_name = response.get('domain', requested)
+                created = True
+            except TechnitiumError as exc:
+                # A CIDR/IP zone that already exists under its computed reverse
+                # name looks unmatched here (the pre-check only compares exact
+                # names), and the server rejects the recreate. It also tells us
+                # the real name in the error, so recover instead of failing -
+                # this is what makes reverse zones from CIDR/IP idempotent.
+                prefix = 'Zone already exists: '
+                if not exc.msg.startswith(prefix):
+                    raise
+                effective_name = exc.msg[len(prefix):].strip()
+                existing = find_zone(client, effective_name)
+        if created:
+            changed = True
+            after['type'] = params['type']
+
+    if existing and existing.get('type') != params['type']:
         if not params['convert']:
             raise TechnitiumError(
                 'Zone %s exists as type %s but type %s was requested. Set convert=true '
                 'to convert it, or remove the zone first.'
-                % (name, existing.get('type'), params['type'])
+                % (effective_name, existing.get('type'), params['type'])
             )
         if not module.check_mode:
-            client.call('/api/zones/convert', params=dict(zone=name, type=params['type']))
+            client.call('/api/zones/convert',
+                        params=dict(zone=effective_name, type=params['type']))
         changed = True
         before['type'] = existing.get('type')
         after['type'] = params['type']
@@ -231,20 +257,20 @@ def run(client):
     if params['enabled'] == currently_disabled:
         if not module.check_mode:
             endpoint = '/api/zones/enable' if params['enabled'] else '/api/zones/disable'
-            client.call(endpoint, params=dict(zone=name))
+            client.call(endpoint, params=dict(zone=effective_name))
         changed = True
         before['disabled'] = currently_disabled
         after['disabled'] = not params['enabled']
 
     if not module.check_mode or existing:
         options_changed, options_before, options_after = apply_options(
-            client, name, module.check_mode)
+            client, effective_name, module.check_mode)
         if options_changed:
             changed = True
             before.update(options_before)
             after.update(options_after)
 
-    zone = find_zone(client, name) if not module.check_mode else existing
+    zone = find_zone(client, effective_name) if not module.check_mode else existing
     return dict(changed=changed, zone=zone, diff=dict(before=before, after=after))
 
 

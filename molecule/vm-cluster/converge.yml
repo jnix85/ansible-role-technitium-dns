@@ -1,0 +1,71 @@
+---
+- name: Converge a three node cluster with a floating VIP
+  hosts: technitium_dns
+  become: true
+  strategy: linear
+
+  vars:
+    technitium_dns_admin_password: molecule-test-password
+
+    # node_address and cluster_vip come from the scenario inventory. The
+    # interface is whichever one actually carries node_address, so this does
+    # not hardcode a vagrant/libvirt interface name.
+    private_interface: >-
+      {{ ansible_facts | dict2items
+         | selectattr('value.ipv4', 'defined')
+         | selectattr('value.ipv4.address', 'equalto', node_address)
+         | map(attribute='value.device') | first }}
+    peer_addresses: >-
+      {{ groups['technitium_dns'] | difference([inventory_hostname])
+         | map('extract', hostvars, 'node_address') | list }}
+
+    # ns1.molecule.test etc, which is what clustering requires: every node's
+    # domain must be a child of the cluster domain.
+    technitium_dns_node_domain: "{{ inventory_hostname | replace('technitium-', '') }}.molecule.test"
+
+    technitium_dns_cluster_enabled: true
+    technitium_dns_cluster_domain: molecule.test
+    technitium_dns_cluster_primary: technitium-ns1
+
+    # The private network address, not vagrant's NAT interface, is what the
+    # other nodes can reach this one on.
+    technitium_dns_cluster_node_ip_addresses:
+      - "{{ node_address }}"
+
+    technitium_dns_settings:
+      recursion: AllowOnlyForPrivateNetworks
+      dnssecValidation: true
+      forwarders:
+        - 9.9.9.9
+      forwarderProtocol: Tcp
+
+    technitium_dns_zones:
+      - zone: lab.molecule.test
+        type: Primary
+        catalog: "{{ technitium_dns_cluster_catalog_zone }}"
+        records:
+          - domain: www.lab.molecule.test
+            type: A
+            exclusive: true
+            data:
+              ipAddress: "{{ cluster_vip }}"
+
+    technitium_dns_keepalived_enabled: true
+    technitium_dns_keepalived_instances:
+      - name: DNS_VIP
+        interface: "{{ private_interface }}"
+        virtual_router_id: 51
+        # ns1 highest, so the VIP starts somewhere predictable.
+        priority: "{{ 150 - (groups['technitium_dns'].index(inventory_hostname) * 10) }}"
+        unicast_src_ip: "{{ node_address }}"
+        unicast_peers: "{{ peer_addresses }}"
+        virtual_ipaddresses:
+          - address: "{{ cluster_vip }}"
+            prefix: 24
+        authentication:
+          auth_type: PASS
+          auth_pass: molecule
+
+  roles:
+    # By path: molecule's roles path does not include the repo's parent.
+    - role: "{{ playbook_dir }}/../.."

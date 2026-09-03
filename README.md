@@ -218,13 +218,26 @@ and [`meta/argument_specs.yml`](meta/argument_specs.yml) for the validated inter
 ```bash
 python -m pytest tests/unit -q     # API client: encoding, comparison, diff logic
 yamllint . && ansible-lint
-molecule test -s default           # one node, converge + idempotence + verify
-molecule test -s cluster           # three nodes, cluster + VIP failover
+molecule test -s default           # one node (Docker), converge + idempotence + verify
+molecule test -s cluster           # three nodes (Docker), cluster + VIP failover
+molecule test -s vm-cluster        # three nodes (VMs), the same, on real interfaces
 ```
 
-The cluster scenario asserts that all three nodes report each other as connected,
-that a catalog member zone reaches the secondaries, and that stopping keepalived
-on the master moves the VIP to a backup that still answers queries.
+The `cluster` and `vm-cluster` scenarios assert that all three nodes report each
+other as connected, that a catalog member zone reaches the secondaries, and that
+stopping keepalived on the master moves the VIP to a backup that still answers
+queries.
+
+`default` and `cluster` run in Docker, which is fast but a poor substitute for a
+real host in two ways this role specifically cares about: the official installer
+refuses to run without systemd as PID 1, and containers share a bridge rather
+than a real L2 segment, which makes VRRP failover a weak test. `vm-cluster` runs
+the same cluster scenario on three Debian VMs (Vagrant + libvirt/KVM) instead,
+which also exercises the systemd-resolved stub-listener handling that a stock
+Debian host needs and a container never has. It requires
+`libvirt-daemon-system`, `vagrant`, and `vagrant-libvirt` on the test host, and
+is not part of the default `molecule test` — run it explicitly, or via the
+`workflow_dispatch` CI job on a runner with KVM available.
 
 ## Licence
 

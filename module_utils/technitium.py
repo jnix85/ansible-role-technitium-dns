@@ -142,7 +142,22 @@ def values_equal(current, desired):
     if isinstance(desired_n, list) or isinstance(current_n, list):
         current_list = current_n if isinstance(current_n, list) else _split_csv(current_n)
         desired_list = desired_n if isinstance(desired_n, list) else _split_csv(desired_n)
-        return [str(item) for item in current_list] == [str(item) for item in desired_list]
+        current_strs = [str(item) for item in current_list]
+        desired_strs = [str(item) for item in desired_list]
+        if current_strs == desired_strs:
+            return True
+        # An IPv6 wildcard bind subsumes the IPv4 wildcard in dual-stack mode,
+        # and Technitium's web service settings persist only the IPv6 entry
+        # when both are declared - "0.0.0.0" (or "0.0.0.0:<port>") never
+        # comes back from settings/get once "[::]" is also present, so it
+        # would otherwise look like a permanent, unfixable drift. Only drop
+        # entries this specific, well-defined way; everything else about list
+        # comparison stays a strict, order-sensitive equality check.
+        reduced_desired = [
+            item for item in desired_strs
+            if not _ipv4_any_subsumed_by_ipv6_any(item, current_strs)
+        ]
+        return current_strs == reduced_desired
 
     if isinstance(current_n, bool) or isinstance(desired_n, bool):
         return bool(current_n) == bool(desired_n)
@@ -158,6 +173,17 @@ def values_equal(current, desired):
         return _is_empty(current_n) and _is_empty(desired_n)
 
     return str(current_n) == str(desired_n)
+
+
+def _ipv4_any_subsumed_by_ipv6_any(item, current_strs):
+    """True when ``item`` is an IPv4-any address the IPv6-any entry covers."""
+    if item == '0.0.0.0':
+        suffix = ''
+    elif item.startswith('0.0.0.0:'):
+        suffix = item[len('0.0.0.0'):]
+    else:
+        return False
+    return ('[::]' + suffix) in current_strs or ('::' + suffix) in current_strs
 
 
 def _is_empty(value):
@@ -268,13 +294,8 @@ class TechnitiumClient(object):
     # --------------------------------------------------------------- requests
 
     def status(self):
-        """``/api/status`` needs no authentication and reports ``hasDefaultCredentials``.
-
-        Unlike every other call it returns its fields at the top level rather than
-        nested under ``response``, so the envelope must not be unwrapped.
-        """
-        return self._request('/api/status', authenticated=False, method='GET',
-                             unwrap=False)
+        """``/api/status`` needs no authentication and reports ``hasDefaultCredentials``."""
+        return self._request('/api/status', authenticated=False, method='GET')
 
     def get(self, path, params=None):
         return self.call(path, params=params, method='GET')
@@ -313,7 +334,7 @@ class TechnitiumClient(object):
         return self._request(path, params=call_params, body=body, method=method)
 
     def _request(self, path, params=None, body=None, method='POST',
-                 authenticated=True, unwrap=True):
+                 authenticated=True):
         query = serialize_params(params)
         headers = {'Accept': 'application/json'}
         if authenticated:
@@ -337,7 +358,7 @@ class TechnitiumClient(object):
         last_error = None
         for attempt in range(self.retries):
             try:
-                return self._fetch(url, data, headers, method, unwrap)
+                return self._fetch(url, data, headers, method)
             except TechnitiumError as exc:
                 # Only transport/server faults are worth retrying; a rejected request
                 # will be rejected again.
@@ -346,7 +367,7 @@ class TechnitiumClient(object):
                 last_error = exc
         raise last_error  # pragma: no cover - loop always returns or raises
 
-    def _fetch(self, url, data, headers, method, unwrap=True):
+    def _fetch(self, url, data, headers, method):
         response, info = fetch_url(
             self.module, url, data=data, headers=headers,
             method=method, timeout=self.timeout,
@@ -388,9 +409,15 @@ class TechnitiumClient(object):
 
         api_status = payload.get('status')
         if api_status == 'ok':
-            if not unwrap:
-                return payload
-            return payload.get('response', {})
+            # Most calls wrap their data as {"status": "ok", "response": {...}}.
+            # A handful - /api/status, user/login, user/createToken,
+            # user/createSingleUseToken - put their fields at the top level
+            # instead, alongside "status", with no "response" key at all.
+            # Detecting the shape here means every caller gets the right one
+            # without needing to know which category its endpoint falls into.
+            if 'response' in payload:
+                return payload['response']
+            return payload
         if api_status == 'invalid-token':
             raise TechnitiumError(
                 'The API token was rejected. Supply a valid api_token, or '

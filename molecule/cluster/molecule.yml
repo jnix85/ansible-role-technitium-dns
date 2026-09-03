@@ -16,11 +16,18 @@ driver:
 platforms:
   - name: technitium-ns1
     image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
+    # Must be set explicitly: with no command the docker driver runs a sleep
+    # loop, systemd never becomes PID 1, and the Technitium installer refuses
+    # to run with "systemd/openrc was not detected".
+    command: /lib/systemd/systemd
     privileged: true
     pre_build_image: true
     cgroupns_mode: host
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /run/lock
     capabilities: [NET_ADMIN, NET_BROADCAST, NET_RAW]
     networks:
       - name: technitium-cluster
@@ -28,11 +35,18 @@ platforms:
 
   - name: technitium-ns2
     image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
+    # Must be set explicitly: with no command the docker driver runs a sleep
+    # loop, systemd never becomes PID 1, and the Technitium installer refuses
+    # to run with "systemd/openrc was not detected".
+    command: /lib/systemd/systemd
     privileged: true
     pre_build_image: true
     cgroupns_mode: host
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /run/lock
     capabilities: [NET_ADMIN, NET_BROADCAST, NET_RAW]
     networks:
       - name: technitium-cluster
@@ -40,11 +54,18 @@ platforms:
 
   - name: technitium-ns3
     image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian12}-ansible:latest"
+    # Must be set explicitly: with no command the docker driver runs a sleep
+    # loop, systemd never becomes PID 1, and the Technitium installer refuses
+    # to run with "systemd/openrc was not detected".
+    command: /lib/systemd/systemd
     privileged: true
     pre_build_image: true
     cgroupns_mode: host
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /run/lock
     capabilities: [NET_ADMIN, NET_BROADCAST, NET_RAW]
     networks:
       - name: technitium-cluster
@@ -55,25 +76,26 @@ provisioner:
   env:
     ANSIBLE_LIBRARY: "${MOLECULE_PROJECT_DIRECTORY}/library"
     ANSIBLE_MODULE_UTILS: "${MOLECULE_PROJECT_DIRECTORY}/module_utils"
+  # An idempotence failure otherwise only names the non-idempotent task, not
+  # what changed. Every module here already returns a diff key; --diff is
+  # what makes ansible print it.
+  options:
+    diff: true
   inventory:
-    # Scoped to the containers by name, not to "all": molecule's own create and
-    # destroy playbooks run against localhost, which must keep its own user.
+    # Scoped to the containers by name, not to "all": molecule's own create
+    # and destroy playbooks run against localhost, which must keep its own
+    # user.
     host_vars:
-      technitium-ns1:
+      technitium-ns1: &container_root
         ansible_user: root
-        # The containers already run as root. Attempting sudo there fails with
-        # "PAM account management error", and it buys nothing.
+        # docker exec already runs as root in these privileged containers, so
+        # become/sudo is both unnecessary and unreliable this early in boot:
+        # sudo's PAM account-management phase needs dbus/systemd-logind, which
+        # can still be settling for a few seconds after systemd itself reports
+        # "running".
         ansible_become: false
-      technitium-ns2:
-        ansible_user: root
-        # The containers already run as root. Attempting sudo there fails with
-        # "PAM account management error", and it buys nothing.
-        ansible_become: false
-      technitium-ns3:
-        ansible_user: root
-        # The containers already run as root. Attempting sudo there fails with
-        # "PAM account management error", and it buys nothing.
-        ansible_become: false
+      technitium-ns2: *container_root
+      technitium-ns3: *container_root
   config_options:
     defaults:
       callbacks_enabled: profile_tasks

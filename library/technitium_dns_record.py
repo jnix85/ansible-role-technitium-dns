@@ -255,7 +255,11 @@ def run(client):
     if changed and not module.check_mode:
         after = fetch_records(client, params['domain'], params['zone'], params['type'])
 
-    return dict(changed=changed, records=after, diff=dict(before=before, after=after))
+    # diff.before/after must be dicts (or strings) for Ansible's --diff
+    # renderer; a bare list makes it fail with "'list' object has no
+    # attribute 'splitlines'" instead of showing anything.
+    return dict(changed=changed, records=after,
+                diff=dict(before={'records': before}, after={'records': after}))
 
 
 def main():

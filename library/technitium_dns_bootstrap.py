@@ -122,8 +122,13 @@ def main():
 
     if changed and not module.check_mode:
         client.use_token(token)
-        client.call('/api/user/changePassword',
-                    params={'pass': to_api_value(params['admin_password'])})
+        # 'pass' is the CURRENT password (what we just logged in with);
+        # 'newPass' is the one being set. Sending the new password as 'pass'
+        # and omitting 'newPass' is rejected with "Parameter 'newPass' missing.".
+        client.call('/api/user/changePassword', params={
+            'pass': to_api_value(password),
+            'newPass': to_api_value(params['admin_password']),
+        })
         token = client.login_as(params['admin_username'], params['admin_password'])
 
     client.use_token(token)
