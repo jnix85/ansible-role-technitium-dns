@@ -1,0 +1,38 @@
+---
+# Opt-in, generic: sets or removes `_acme-challenge` TXT record(s) for an
+# ACME DNS-01 challenge. Not part of the default tasks/main.yml flow — only
+# reached via an explicit `include_role: tasks_from: acme_dns01_record`.
+#
+# Not Samba-specific (unlike samba_ad_zone.yml/samba_ad_records.yml) — any
+# role in this fleet that needs a DNS-01 certificate against a zone this
+# Technitium cluster hosts can call this the same way (see
+# ansible-role-samba_dc's roles/samba_dc/tasks/certificate.yml).
+#
+# Each record is written `exclusive` (see technitium_dns_record's `exclusive`)
+# so a renewal's new challenge value replaces the old one instead of piling
+# up stale TXT records under the same name. `technitium_dns_acme_zone` is
+# optional — omit it to let the API resolve the closest authoritative zone,
+# which is what you want when the challenge name lives in a different zone
+# than the certificate's own domain (CNAME delegation for a non-public AD
+# zone — see ansible-role-samba_dc's README "Certificates").
+#
+# Expected shape of technitium_dns_acme_records, one dict per challenge:
+#   - domain: _acme-challenge.dc1.directory.clawduino.com
+#     value: <the token acme.sh printed for this domain>
+
+- name: Set or remove ACME DNS-01 challenge TXT record(s)
+  technitium_dns_record:
+    api_url: "{{ technitium_dns_acme_api_url }}"
+    api_token: "{{ technitium_dns_acme_api_token }}"
+    validate_certs: "{{ technitium_dns_acme_api_validate_certs | default(true) }}"
+    api_timeout: "{{ technitium_dns_acme_api_timeout | default(30) }}"
+    zone: "{{ technitium_dns_acme_zone | default(omit) }}"
+    domain: "{{ item.domain }}"
+    type: TXT
+    data: { text: "{{ item.value }}" }
+    ttl: "{{ technitium_dns_acme_ttl | default(60) }}"
+    exclusive: true
+    state: "{{ technitium_dns_acme_state | default('present') }}"
+  loop: "{{ technitium_dns_acme_records }}"
+  loop_control:
+    label: "{{ item.domain }}"

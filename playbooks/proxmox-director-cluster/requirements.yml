@@ -1,0 +1,10 @@
+---
+# ansible-role-keepalived is a separate role (not published to Galaxy at the
+# time this example was written). Point `src` at wherever you host it - a
+# git remote, or a local path if you're running from a checkout next to this
+# one (e.g. `../../../ansible-role-keepalived`, installed with
+# `ansible-galaxy role install -r requirements.yml -p ../../roles`).
+roles:
+  - name: ansible-role-keepalived
+    src: git+ssh://git@github.com/<your-org>/ansible-role-keepalived.git
+    version: main

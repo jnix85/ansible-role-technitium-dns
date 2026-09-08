@@ -1,0 +1,140 @@
+---
+# Same five-node Technitium cluster, but VRRP moves off the DNS nodes onto
+# two dedicated director hosts running ansible-role-keepalived in IPVS DR
+# mode. Use this instead of ../proxmox-ns-cluster/ when you want to be able
+# to move, scale, or troubleshoot VIP failover independently of the DNS
+# nodes themselves.
+#
+#   cluster domain : dns.internal.example.com
+#   service VIP    : 10.1.0.53/23   (held by whichever director is master)
+#   DNS nodes      : ns1-ns5 (10.1.0.21-25/23) - no keepalived here
+#   directors      : dnslb1/dnslb2 (10.1.0.51-52/23) - new hosts
+#
+# This mirrors ansible-role-keepalived's own committed example (three
+# directors fronting five DNS backends over IPVS DR), just with two
+# directors and the real ns1-ns5 addresses instead of that role's
+# documentation (RFC 5737) addresses.
+#
+# IPVS DR mode requires the VIP to be bound non-ARP-advertising on every
+# backend (lo:0 + arp_ignore=1/arp_announce=2) - see
+# ansible-role-keepalived's README "Technitium design notes" and its
+# `keepalived_onlink_routes` handling of the matching director-side route
+# blackhole. That backend-side config is NOT part of
+# ansible-role-technitium-dns and must be applied separately (see this
+# directory's README).
+
+all:
+  children:
+    technitium_dns:
+      hosts:
+        ns1:
+          ansible_host: 10.1.0.21
+          technitium_dns_node_domain: ns1.dns.internal.example.com
+        ns2:
+          ansible_host: 10.1.0.22
+          technitium_dns_node_domain: ns2.dns.internal.example.com
+        ns3:
+          ansible_host: 10.1.0.23
+          technitium_dns_node_domain: ns3.dns.internal.example.com
+        ns4:
+          ansible_host: 10.1.0.24
+          technitium_dns_node_domain: ns4.dns.internal.example.com
+        ns5:
+          ansible_host: 10.1.0.25
+          technitium_dns_node_domain: ns5.dns.internal.example.com
+
+      vars:
+        technitium_dns_admin_password: "{{ vault_technitium_admin_password }}"
+
+        technitium_dns_cluster_enabled: true
+        technitium_dns_cluster_domain: dns.internal.example.com
+        technitium_dns_cluster_primary: ns1
+
+        technitium_dns_settings:
+          recursion: AllowOnlyForPrivateNetworks
+          dnssecValidation: true
+          forwarders:
+            - 9.9.9.9
+            - 149.112.112.112
+          forwarderProtocol: Tls
+          enableBlocking: true
+          blockListUrls:
+            - https://big.oisd.nl/
+
+        technitium_dns_zones:
+          - zone: dns.internal.example.com
+            type: Primary
+            catalog: "{{ technitium_dns_cluster_catalog_zone }}"
+          - zone: 10.1.0.0/23
+            type: Primary
+            catalog: "{{ technitium_dns_cluster_catalog_zone }}"
+
+        # No VRRP on the DNS nodes - the directors own the VIP instead.
+        technitium_dns_keepalived_enabled: false
+
+        technitium_dns_manage_firewall: true
+        # Directors reach every node on port 53; nothing else changes.
+
+    keepalived_directors:
+      hosts:
+        dnslb1:
+          ansible_host: 10.1.0.51
+          keepalived_node_ip: 10.1.0.51
+          keepalived_node_priority: 150
+        dnslb2:
+          ansible_host: 10.1.0.52
+          keepalived_node_ip: 10.1.0.52
+          keepalived_node_priority: 140
+      vars:
+        keepalived_interface: eth0
+        keepalived_vip: 10.1.0.53
+        keepalived_vip_cidr: 23
+        keepalived_vrrp_auth_password: "{{ vault_vrrp_password }}"
+        # DR mode: the director never forwards backend traffic through
+        # itself, so it doesn't need to route packets between interfaces.
+        keepalived_manage_ip_forwarding: false
+
+        keepalived_onlink_routes:
+          - vip: "{{ keepalived_vip }}"
+            interface: "{{ keepalived_interface }}"
+
+        keepalived_vrrp_instances:
+          - name: VI_DNS
+            state: BACKUP
+            interface: "{{ keepalived_interface }}"
+            virtual_router_id: 53
+            priority: "{{ keepalived_node_priority }}"
+            advert_int: 1
+            unicast_src_ip: "{{ keepalived_node_ip }}"
+            unicast_peers: >-
+              {{ groups['keepalived_directors']
+                 | reject('equalto', inventory_hostname)
+                 | map('extract', hostvars, 'keepalived_node_ip') | list }}
+            auth_type: PASS
+            auth_pass: "{{ keepalived_vrrp_auth_password }}"
+            virtual_ipaddresses:
+              - "{{ keepalived_vip }}/{{ keepalived_vip_cidr }} dev {{ keepalived_interface }}"
+
+        # Backend pool = every technitium_dns host's address, so the two
+        # roles compose without hand-maintaining a second copy of ns1-ns5.
+        keepalived_dns_backends: >-
+          {{ groups['technitium_dns']
+             | map('extract', hostvars, 'ansible_host')
+             | map('community.general.dict_kv', 'address')
+             | map('combine', {'port': 53}) | list }}
+
+        keepalived_virtual_servers:
+          - name: technitium-dns-udp
+            address: "{{ keepalived_vip }}"
+            port: 53
+            protocol: UDP
+            lb_algo: rr
+            lb_kind: DR
+            real_servers: "{{ keepalived_dns_backends }}"
+          - name: technitium-dns-tcp
+            address: "{{ keepalived_vip }}"
+            port: 53
+            protocol: TCP
+            lb_algo: rr
+            lb_kind: DR
+            real_servers: "{{ keepalived_dns_backends }}"

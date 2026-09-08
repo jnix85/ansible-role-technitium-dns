@@ -1,0 +1,49 @@
+---
+# Deploy the cluster.
+#
+#   ansible-playbook -i examples/proxmox-ns-cluster/inventory.yml examples/proxmox-ns-cluster/site.yml --check --diff
+#   ansible-playbook -i examples/proxmox-ns-cluster/inventory.yml examples/proxmox-ns-cluster/site.yml
+#
+# The second run must report zero changed tasks.
+
+- name: Technitium DNS cluster with on-node VRRP failover
+  hosts: technitium_dns
+  become: true
+
+  # The default linear strategy is required: secondaries must not try to join
+  # before the primary has initialized the cluster.
+  strategy: linear
+
+  vars_files:
+    - vault.yml
+
+  roles:
+    - role: ansible-role-technitium-dns
+
+  post_tasks:
+    - name: Read the cluster state
+      technitium_dns_info:
+        api_url: "{{ technitium_dns_api_url }}"
+        api_token: "{{ technitium_dns_api_args.api_token }}"
+        gather: [cluster]
+      register: technitium_state
+      no_log: true
+      run_once: true
+
+    - name: Assert every node is in the cluster and connected
+      ansible.builtin.assert:
+        that:
+          - technitium_state.cluster.clusterInitialized
+          - technitium_state.cluster.nodes | length == ansible_play_hosts | length
+          - technitium_state.cluster.nodes
+            | rejectattr('state', 'in', ['Self', 'Connected'])
+            | list | length == 0
+        success_msg: >-
+          Cluster {{ technitium_state.cluster.clusterDomain }} is healthy with
+          {{ technitium_state.cluster.nodes | length }} nodes.
+        fail_msg: >-
+          Cluster is not healthy:
+          {{ technitium_state.cluster.nodes
+             | map(attribute='name') | zip(technitium_state.cluster.nodes
+             | map(attribute='state')) | list }}
+      run_once: true

@@ -1,0 +1,36 @@
+---
+# Opt-in: pushes a caller-supplied list of DNS records into a Samba AD realm's
+# zone (see samba_ad_zone.yml). Not part of the default tasks/main.yml flow —
+# only reached via an explicit `include_role: tasks_from: samba_ad_records`.
+#
+# Declarative, not dynamic DNS: the caller (ansible-role-samba_dc) computes
+# the standard AD record set (A records for each DC, SRV records for
+# LDAP/Kerberos/kpasswd/GC and their _msdcs equivalents) and passes it in as
+# technitium_dns_samba_records. Re-running with the same input list is a
+# no-op. Each record is exclusive (see technitium_dns_record's `exclusive`),
+# so re-running after a DC's IP changes replaces the old value rather than
+# accumulating stale entries.
+#
+# Expected shape of technitium_dns_samba_records, one dict per record:
+#   - domain: _ldap._tcp.directory.clawduino.com
+#     type: SRV
+#     data: {priority: 0, weight: 100, port: 389, target: dc1.directory.clawduino.com}
+#   - domain: dc1.directory.clawduino.com
+#     type: A
+#     data: {ipAddress: 10.1.0.61}
+
+- name: Push Samba AD DNS records into Technitium
+  technitium_dns_record:
+    api_url: "{{ technitium_dns_samba_api_url }}"
+    api_token: "{{ technitium_dns_samba_api_token }}"
+    validate_certs: "{{ technitium_dns_samba_api_validate_certs | default(true) }}"
+    api_timeout: "{{ technitium_dns_samba_api_timeout | default(30) }}"
+    zone: "{{ technitium_dns_samba_zone }}"
+    domain: "{{ item.domain }}"
+    type: "{{ item.type }}"
+    data: "{{ item.data }}"
+    ttl: "{{ item.ttl | default(omit) }}"
+    exclusive: "{{ item.exclusive | default(false) }}"
+  loop: "{{ technitium_dns_samba_records }}"
+  loop_control:
+    label: "{{ item.domain }} {{ item.type }}"

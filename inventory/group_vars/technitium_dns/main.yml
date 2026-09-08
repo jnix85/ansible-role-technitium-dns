@@ -1,0 +1,72 @@
+---
+# ------------------------------------------------------------ access
+# Real deployments keep these in ansible-vault (see vault.yml.example).
+technitium_dns_admin_password: "{{ vault_technitium_admin_password }}"
+
+# ---------------------------------------------------------- clustering
+technitium_dns_cluster_enabled: true
+technitium_dns_cluster_domain: dns.clawduino.com
+technitium_dns_cluster_primary: ns1
+
+# ------------------------------------------------------------ settings
+# Replicated to every node from the primary.
+technitium_dns_settings:
+  recursion: AllowOnlyForPrivateNetworks
+  dnssecValidation: true
+  forwarders:
+    - 1.1.1.1
+    - 1.0.0.1
+  forwarderProtocol: Tls
+  enableBlocking: true
+  blockListUrls:
+    - https://big.oisd.nl/
+
+# -------------------------------------------------------------- zones
+# Catalog membership provisions these on every secondary automatically.
+technitium_dns_zones:
+  - zone: dns.clawduino.com
+    type: Primary
+    catalog: "{{ technitium_dns_cluster_catalog_zone }}"
+    records:
+      - domain: dns01.dns.clawduino.com
+        type: A
+        data: {ipAddress: 10.1.0.5}
+        update_ptr: true
+        create_ptr_zone: true
+      - domain: dns02.dns.clawduino.com 
+        type: A
+        data: {ipAddress: 10.1.0.6}
+        update_ptr: true
+      - domain: dns03.dns.clawduino.com
+        type: A
+        data: {ipAddress: 10.1.0.7}
+        update_ptr: true
+      - domain: dns04.dns.clawduino.com 
+        type: A
+        exclusive: true
+        data: {ipAddress: 10.1.0.8}
+      - domain: dns05.dns.clawduino.com
+        type: A
+        exclusive: true
+        data: {ipAddress: 10.1.0.9}
+
+  - zone: 10.1.0.0/23
+    type: Primary
+    catalog: "{{ technitium_dns_cluster_catalog_zone }}"
+
+# --------------------------------------------------------- keepalived
+technitium_dns_keepalived_enabled: true
+technitium_dns_keepalived_instances:
+  - name: DNS_VIP
+    interface: "{{ ansible_default_ipv4.interface }}"
+    virtual_router_id: 51
+    priority: "{{ technitium_dns_vrrp_priority }}"
+    virtual_ipaddresses:
+      - address: 10.1.0.4
+        prefix: 24
+    authentication:
+      auth_type: PASS
+      auth_pass: "{{ vault_vrrp_password }}"
+
+# ----------------------------------------------------------- firewall
+technitium_dns_manage_firewall: true

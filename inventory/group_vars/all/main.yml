@@ -1,0 +1,4 @@
+---
+# domain and vm_fqdn come from ../shared-inventory (see ansible.cfg's
+# inventory list and shared-inventory/README.md). Nothing project-specific
+# to override here yet.

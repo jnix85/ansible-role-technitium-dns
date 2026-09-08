@@ -1,0 +1,29 @@
+---
+# Deploy the cluster and its directors.
+#
+#   ansible-playbook -i examples/proxmox-director-cluster/inventory.yml examples/proxmox-director-cluster/site.yml --check --diff
+#   ansible-playbook -i examples/proxmox-director-cluster/inventory.yml examples/proxmox-director-cluster/site.yml
+#
+# Run the DNS play before the director play the first time: IPVS DR mode
+# needs working backends before it's useful to point a VIP at them.
+
+- name: Technitium DNS cluster, no on-node VRRP
+  hosts: technitium_dns
+  become: true
+  strategy: linear
+
+  vars_files:
+    - vault.yml
+
+  roles:
+    - role: ansible-role-technitium-dns
+
+- name: Director nodes owning the DNS service VIP
+  hosts: keepalived_directors
+  become: true
+
+  vars_files:
+    - vault.yml
+
+  roles:
+    - role: ansible-role-keepalived

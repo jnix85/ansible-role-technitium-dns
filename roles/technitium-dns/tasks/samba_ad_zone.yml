@@ -1,0 +1,20 @@
+---
+# Opt-in: provisions a Primary zone for a Samba Active Directory realm hosted
+# by this Technitium cluster. Not part of the default tasks/main.yml flow —
+# only reached via an explicit `include_role: tasks_from: samba_ad_zone`
+# (see ansible-role-samba_dc, which calls this before `samba-tool domain
+# provision`).
+#
+# No TSIG key or dynamic-update ACL is configured here: the calling role is
+# expected to push records declaratively afterward (see samba_ad_records.yml)
+# using the normal API token, not RFC2136 dynamic DNS updates.
+
+- name: Ensure the AD realm's Primary zone exists
+  technitium_dns_zone:
+    api_url: "{{ technitium_dns_samba_api_url }}"
+    api_token: "{{ technitium_dns_samba_api_token }}"
+    validate_certs: "{{ technitium_dns_samba_api_validate_certs | default(true) }}"
+    api_timeout: "{{ technitium_dns_samba_api_timeout | default(30) }}"
+    zone: "{{ technitium_dns_samba_zone }}"
+    type: Primary
+    state: present

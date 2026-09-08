@@ -1,0 +1,4 @@
+---
+technitium_dns_node_domain: dns05.dns.clawduino.com
+technitium_dns_vrrp_priority: 150
+

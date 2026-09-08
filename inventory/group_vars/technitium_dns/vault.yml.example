@@ -1,0 +1,7 @@
+---
+# Copy to vault.yml, set real values, then encrypt:
+#   cp vault.yml.example vault.yml
+#   $EDITOR vault.yml
+#   ansible-vault encrypt vault.yml
+vault_technitium_admin_password: CHANGEME
+vault_vrrp_password: CHANGEME
