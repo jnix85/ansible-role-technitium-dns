@@ -88,6 +88,25 @@
           address to reach this one on.
         quiet: true
 
+# --------------------------------------------------------------------- ACME
+
+- name: Validate the ACME configuration
+  when: technitium_dns_acme_enabled | bool
+  block:
+    - name: Assert the ACME account and certificate details are configured
+      ansible.builtin.assert:
+        that:
+          - technitium_dns_acme_account_email | length > 0
+          - technitium_dns_acme_terms_agreed | bool
+          - technitium_dns_acme_domains | length > 0
+          - technitium_dns_acme_pfx_password | length > 0
+        fail_msg: >-
+          ACME needs technitium_dns_acme_account_email,
+          technitium_dns_acme_terms_agreed: true, at least one entry in
+          technitium_dns_acme_domains, and technitium_dns_acme_pfx_password
+          (keep it in a vault).
+        quiet: true
+
 # ---------------------------------------------------------------- keepalived
 
 - name: Validate the keepalived configuration

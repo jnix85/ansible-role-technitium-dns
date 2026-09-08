@@ -57,8 +57,15 @@
   ansible.builtin.import_tasks: dhcp.yml
   tags: [technitium_dhcp]
 
-# These two are dynamic includes rather than imports so the role does not need
-# ansible.posix and community.general installed unless the features are used.
+# Dynamic includes rather than imports so the role does not need
+# community.crypto, ansible.posix or community.general installed unless the
+# matching feature is used. acme.yml runs after zones.yml because DNS-01
+# validation publishes its challenge record into a zone this play manages.
+- name: Request and install an ACME certificate
+  ansible.builtin.include_tasks: acme.yml
+  when: technitium_dns_acme_enabled | bool
+  tags: [technitium_acme]
+
 - name: Configure the firewall
   ansible.builtin.include_tasks: firewall.yml
   when: technitium_dns_manage_firewall | bool

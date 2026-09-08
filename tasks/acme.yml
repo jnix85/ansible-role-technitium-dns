@@ -1,0 +1,163 @@
+---
+# Requests a certificate from an ACME server (Let's Encrypt by default) and
+# points Technitium's web service at it, so nobody has to hand-carry a
+# certificate onto these hosts. Validation is DNS-01: the challenge record is
+# published through this role's own technitium_dns_record module, against
+# whichever zone this server is already authoritative for - no separate web
+# server or open port 80 required.
+#
+# Re-running the play is what renews the certificate. community.crypto's
+# acme_certificate module only reissues once fewer than
+# technitium_dns_acme_remaining_days remain, so every task below is a no-op
+# on runs in between. Schedule the play (cron, AWX, CI) to actually renew.
+
+- name: Create the ACME/certificate directory
+  ansible.builtin.file:
+    path: "{{ technitium_dns_acme_cert_dir }}"
+    state: directory
+    owner: "{{ technitium_dns_user }}"
+    group: "{{ technitium_dns_group }}"
+    mode: "0750"
+
+- name: Generate the ACME account key
+  community.crypto.openssl_privatekey:
+    path: "{{ technitium_dns_acme_account_key_path }}"
+    type: "{{ technitium_dns_acme_account_key_type }}"
+    size: "{{ technitium_dns_acme_account_key_size }}"
+    owner: "{{ technitium_dns_user }}"
+    group: "{{ technitium_dns_group }}"
+    mode: "0600"
+
+- name: Generate the certificate's private key
+  community.crypto.openssl_privatekey:
+    path: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}.key"
+    type: "{{ technitium_dns_acme_key_type }}"
+    size: "{{ technitium_dns_acme_key_size }}"
+    owner: "{{ technitium_dns_user }}"
+    group: "{{ technitium_dns_group }}"
+    mode: "0600"
+
+- name: Generate the certificate signing request
+  community.crypto.openssl_csr:
+    path: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}.csr"
+    privatekey_path: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}.key"
+    common_name: "{{ technitium_dns_acme_domains | first }}"
+    subject_alt_name: "{{ technitium_dns_acme_domains | map('regex_replace', '^', 'DNS:') | list }}"
+    owner: "{{ technitium_dns_user }}"
+    group: "{{ technitium_dns_group }}"
+    mode: "0640"
+
+# Step 1: create/refresh the order. If the certificate still has more than
+# technitium_dns_acme_remaining_days left, this reports no change and every
+# task below is skipped.
+- name: Request a certificate order
+  community.crypto.acme_certificate:
+    acme_directory: "{{ technitium_dns_acme_directory_url }}"
+    acme_version: "{{ technitium_dns_acme_version }}"
+    account_key_src: "{{ technitium_dns_acme_account_key_path }}"
+    account_email: "{{ technitium_dns_acme_account_email }}"
+    terms_agreed: "{{ technitium_dns_acme_terms_agreed }}"
+    challenge: dns-01
+    csr: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}.csr"
+    dest: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}.pem"
+    fullchain_dest: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}-fullchain.pem"
+    chain_dest: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}-chain.pem"
+    remaining_days: "{{ technitium_dns_acme_remaining_days }}"
+  register: technitium_dns_acme_order
+
+- name: Publish the DNS-01 challenge records
+  technitium_dns_record:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    domain: "{{ item.key }}"
+    type: TXT
+    ttl: "{{ technitium_dns_acme_challenge_ttl }}"
+    exclusive: true
+    data:
+      text: "{{ item.value | first }}"
+  loop: "{{ technitium_dns_acme_order.challenge_data_dns | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  # A data dependency on the previous task's registered challenge tokens, not
+  # a config-changed side effect - a handler has no access to that data.
+  when: technitium_dns_acme_order is changed  # noqa: no-handler
+
+- name: Wait for the challenge records to propagate
+  ansible.builtin.wait_for:
+    timeout: "{{ technitium_dns_acme_dns_propagation_wait }}"
+  when:
+    - technitium_dns_acme_order is changed
+    - technitium_dns_acme_dns_propagation_wait | int > 0
+
+# Step 2: hand the order back so the ACME server can validate the challenge
+# and issue the certificate.
+- name: Complete the certificate order
+  community.crypto.acme_certificate:
+    acme_directory: "{{ technitium_dns_acme_directory_url }}"
+    acme_version: "{{ technitium_dns_acme_version }}"
+    account_key_src: "{{ technitium_dns_acme_account_key_path }}"
+    account_email: "{{ technitium_dns_acme_account_email }}"
+    terms_agreed: "{{ technitium_dns_acme_terms_agreed }}"
+    challenge: dns-01
+    csr: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}.csr"
+    dest: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}.pem"
+    fullchain_dest: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}-fullchain.pem"
+    chain_dest: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}-chain.pem"
+    remaining_days: "{{ technitium_dns_acme_remaining_days }}"
+    data: "{{ technitium_dns_acme_order }}"
+  register: technitium_dns_acme_result
+  when: technitium_dns_acme_order is changed  # noqa: no-handler
+
+- name: Remove the DNS-01 challenge records
+  technitium_dns_record:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    domain: "{{ item.key }}"
+    type: TXT
+    state: absent
+    data:
+      text: "{{ item.value | first }}"
+  loop: "{{ technitium_dns_acme_order.challenge_data_dns | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: technitium_dns_acme_order is changed  # noqa: no-handler
+
+- name: Bundle the certificate and key into a PFX
+  community.crypto.openssl_pkcs12:
+    action: export
+    path: "{{ technitium_dns_acme_pfx_path }}"
+    friendly_name: "{{ technitium_dns_acme_domains | first }}"
+    privatekey_path: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}.key"
+    certificate_path: "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}.pem"
+    other_certificates:
+      - "{{ technitium_dns_acme_cert_dir }}/{{ technitium_dns_acme_domains | first }}-chain.pem"
+    passphrase: "{{ technitium_dns_acme_pfx_password }}"
+    owner: "{{ technitium_dns_user }}"
+    group: "{{ technitium_dns_group }}"
+    mode: "0640"
+  register: technitium_dns_acme_pfx
+  no_log: true
+  when: technitium_dns_acme_order is changed  # noqa: no-handler
+
+# Only pushed to Technitium when the certificate actually changed - sending
+# webServiceTlsCertificatePassword every run would report changed forever,
+# since the API never reads a password setting back.
+- name: Point Technitium at the ACME-issued certificate
+  technitium_dns_settings:
+    api_url: "{{ technitium_dns_api_args.api_url }}"
+    api_token: "{{ technitium_dns_api_args.api_token }}"
+    validate_certs: "{{ technitium_dns_api_args.validate_certs }}"
+    api_timeout: "{{ technitium_dns_api_args.api_timeout }}"
+    settings:
+      webServiceEnableTls: true
+      webServiceUseSelfSignedTlsCertificate: false
+      webServiceTlsPort: "{{ technitium_dns_https_port }}"
+      webServiceTlsCertificatePath: "{{ technitium_dns_acme_pfx_path }}"
+      webServiceTlsCertificatePassword: "{{ technitium_dns_acme_pfx_password }}"
+    update_write_only: true
+  no_log: true
+  when: technitium_dns_acme_pfx is changed  # noqa: no-handler

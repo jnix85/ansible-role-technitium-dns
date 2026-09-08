@@ -1,7 +1,8 @@
 # ansible-role-technitium-dns
 
 Install and declaratively configure [Technitium DNS Server](https://technitium.com/dns/),
-its built-in **clustering**, and **keepalived/VRRP** for a floating service address.
+its built-in **clustering**, **keepalived/VRRP** for a floating service address,
+and **ACME certificates** it installs and renews itself.
 
 You describe the DNS service you want; the role converges to it. Re-runs are green,
 `--check --diff` shows what would change, and everything the server's HTTP API can do
@@ -28,7 +29,8 @@ when the current holder stops answering. You almost always want both.
 - Ansible 2.15+
 - Debian 12/13, Ubuntu 22.04/24.04, or RHEL/Rocky/Alma 9/10 with systemd
 - Collections, only when the matching feature is enabled:
-  `ansible.posix` (keepalived sysctls, firewalld) and `community.general` (ufw)
+  `ansible.posix` (keepalived sysctls, firewalld), `community.general` (ufw),
+  and `community.crypto` (ACME certificates)
 
 ## Quick start
 
@@ -155,6 +157,67 @@ Defaults chosen deliberately:
 - Transitions are logged to syslog by `notify_vrrp.sh`; hook your own command in
   with `technitium_dns_keepalived_notify_command`.
 
+## TLS certificates via ACME
+
+```yaml
+technitium_dns_acme_enabled: true
+technitium_dns_acme_account_email: hostmaster@example.com
+technitium_dns_acme_terms_agreed: true
+technitium_dns_acme_domains:
+  - ns1.example.com
+technitium_dns_acme_pfx_password: "{{ vault_acme_pfx_password }}"
+```
+
+Requests a certificate from an ACME server (Let's Encrypt by default;
+override `technitium_dns_acme_directory_url` for staging or another server),
+bundles it into a PFX with `community.crypto`, and sets
+`webServiceTlsCertificatePath` / `webServiceTlsCertificatePassword` on
+Technitium's web service itself — nobody has to carry a certificate onto
+these hosts by hand.
+
+Validation is `dns-01`: the `_acme-challenge` TXT record is published
+through this role's own `technitium_dns_record` module, against whichever
+zone this server is already authoritative for. No port 80, no separate web
+server, and it works for internal names Let's Encrypt could never reach over
+HTTP.
+
+Things worth knowing:
+
+- **Renewal happens on re-run**, not on a timer. `community.crypto`'s
+  `acme_certificate` module only reissues once fewer than
+  `technitium_dns_acme_remaining_days` (default 30) remain; every other run
+  is a no-op. Schedule the play — cron, AWX, CI — the same way you would any
+  other Ansible-managed certificate.
+- The PFX passphrase (`technitium_dns_acme_pfx_password`) is required and
+  belongs in a vault, same as `technitium_dns_admin_password`.
+- The first entry in `technitium_dns_acme_domains` becomes the certificate's
+  common name and the filenames under `technitium_dns_acme_cert_dir`; every
+  entry becomes a SAN.
+- This is node-local, like the rest of `technitium_dns_node_settings` —
+  clustering does not replicate TLS certificates, so each node in a cluster
+  requests and installs its own.
+
+## Choosing a VIP topology
+
+Two ways to give clients a stable address, both compatible with this role:
+
+- **On-node VRRP** (above): keepalived runs on the Technitium nodes
+  themselves. Simplest — no extra hosts. See
+  `examples/proxmox-ns-cluster/` for a full example against a real
+  five-node topology.
+- **Separate director nodes**: `technitium_dns_keepalived_enabled: false`
+  here, and a dedicated pair of hosts runs keepalived + IPVS in front of
+  the DNS nodes instead (e.g. `ansible-role-keepalived`, a companion role
+  not part of this repo). Use this if VRRP on the DNS nodes ever becomes a
+  problem — election flapping under load, wanting failover hosts shared
+  across multiple services — without changing how this role configures
+  Technitium. See `examples/proxmox-director-cluster/` for a full example,
+  including the IPVS DR-mode backend prerequisites this role deliberately
+  does not manage.
+
+Neither example currently reflects any specific production deployment;
+each README says explicitly what it is and is not a template for.
+
 ## Installation methods
 
 | `technitium_dns_install_method` | Behaviour |
@@ -206,12 +269,35 @@ becomes the only one of that name and type, and anything else is removed.
 See [`defaults/main.yml`](defaults/main.yml) — every variable is documented there —
 and [`meta/argument_specs.yml`](meta/argument_specs.yml) for the validated interface.
 
+## Samba AD integration (opt-in)
+
+`tasks/samba_ad_zone.yml` and `tasks/samba_ad_records.yml` let another role
+(e.g. `ansible-role-samba_dc`) provision a Primary zone for a Samba AD realm
+and push its DNS records into this cluster, declaratively — not via Samba's
+own dynamic DNS/TSIG. Neither is part of the default `tasks/main.yml` flow;
+both are reached only via an explicit `include_role: tasks_from:`. See the
+`technitium_dns_samba_*` variables documented in `defaults/main.yml` for the
+required inputs.
+
+## Generic ACME DNS-01 challenge record (opt-in)
+
+`tasks/acme_dns01_record.yml` publishes or removes an `_acme-challenge` TXT
+record for a DNS-01 certificate request — the remote-caller counterpart to
+this role's own `tasks/acme.yml` (which certifies Technitium's own web
+console using its local bootstrapped API session and isn't reusable outside
+this role). Any role that runs `community.crypto.acme_certificate` itself and
+just needs somewhere to publish/remove the challenge record reaches this via
+`include_role: name: technitium_dns, tasks_from: acme_dns01_record` — see
+`ansible-role-samba_dc`'s `roles/samba_dc/tasks/certificate.yml`. Not part of
+the default `tasks/main.yml` flow. See the `technitium_dns_acme_*` variables
+documented in `defaults/main.yml` for the required inputs.
+
 ## Tags
 
 `technitium_install`, `technitium_service`, `technitium_settings`,
 `technitium_cluster`, `technitium_zones`, `technitium_access`,
 `technitium_blocking`, `technitium_apps`, `technitium_dhcp`,
-`technitium_firewall`, `keepalived`.
+`technitium_acme`, `technitium_firewall`, `keepalived`.
 
 ## Testing
 

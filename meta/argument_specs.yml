@@ -127,6 +127,46 @@ argument_specs:
         type: list
         elements: dict
 
+      technitium_dns_acme_enabled:
+        description:
+          - Request a certificate from an ACME server, bundle it into a PFX and
+            point Technitium's web service at it. Validation is C(dns-01),
+            published through M(technitium_dns_record) against a zone this
+            play manages.
+        type: bool
+        default: false
+
+      technitium_dns_acme_directory_url:
+        description:
+          - ACME v2 directory URL. Defaults to Let's Encrypt production; point
+            it at LE staging, or any other ACME server, to use a different one.
+        type: str
+        default: https://acme-v02.api.letsencrypt.org/directory
+
+      technitium_dns_acme_account_email:
+        description: Contact address for the ACME account. Required when enabled.
+        type: str
+        default: ""
+
+      technitium_dns_acme_terms_agreed:
+        description: Accept the ACME server's terms of service. Required to be C(true) when enabled.
+        type: bool
+        default: false
+
+      technitium_dns_acme_domains:
+        description:
+          - FQDNs the certificate should cover. The first entry becomes the
+            certificate's common name.
+        type: list
+        elements: str
+
+      technitium_dns_acme_pfx_password:
+        description:
+          - Passphrase for the PFX bundle Technitium loads the certificate
+            from. Required when enabled. Keep it in a vault.
+        type: str
+        default: ""
+
       technitium_dns_manage_firewall:
         description: Open the DNS, web console and VRRP ports.
         type: bool
